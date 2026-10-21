@@ -181,9 +181,48 @@
             font-size: 64px;
             margin-bottom: 20px;
         }
+
+        .login {
+            max-width: 400px;
+            margin: 80px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .login h1 {
+            margin-bottom: 20px;
+        }
+
+        .login input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 15px;
+            margin-bottom: 15px;
+        }
+
+        .login button {
+            width: 100%;
+        }
+
+        .hidden {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
+    <form id="loginForm" class="login hidden">
+        <h1>Admin Sign In</h1>
+        <label for="tokenInput">Admin token</label>
+        <input type="password" id="tokenInput" required autocomplete="current-password">
+        <div id="loginError" class="error hidden"></div>
+        <button type="submit">Sign in</button>
+    </form>
+
+    <div id="dashboard" class="hidden">
     <div class="header">
         <h1> Feedback Dashboard</h1>
         <p>Monitor and manage customer feedback</p>
@@ -202,6 +241,7 @@
     <div class="controls">
         <button onclick="loadFeedbacks()">🔄 Refresh</button>
         <button onclick="exportCSV()">📥 Export CSV</button>
+        <button onclick="signOut()">Sign out</button>
     </div>
 
     <div id="loading" class="loading">
@@ -212,12 +252,61 @@
     <div id="error" class="error" style="display: none;"></div>
 
     <div id="feedbackGrid" class="feedback-grid"></div>
+    </div>
 
     <script>
         // REPLACE with your API Gateway URL
         const API_URL = 'https://qorp0jyrl2.execute-api.us-east-1.amazonaws.com/feedback';
 
+        const TOKEN_KEY = 'feedbackAdminToken';
+
         let allFeedbacks = [];
+        let refreshTimer = null;
+
+        // sessionStorage can throw (e.g. blocked storage), so guard every access
+        function getToken() {
+            try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+        }
+
+        function setToken(token) {
+            try {
+                if (token) sessionStorage.setItem(TOKEN_KEY, token);
+                else sessionStorage.removeItem(TOKEN_KEY);
+            } catch { /* token just won't survive a reload */ }
+        }
+
+        function showLogin(message) {
+            clearInterval(refreshTimer);
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('loginForm').classList.remove('hidden');
+            const loginError = document.getElementById('loginError');
+            loginError.textContent = message || '';
+            loginError.classList.toggle('hidden', !message);
+        }
+
+        function showDashboard() {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            loadFeedbacks();
+            // Auto-refresh every 30 seconds
+            clearInterval(refreshTimer);
+            refreshTimer = setInterval(loadFeedbacks, 30000);
+        }
+
+        function signOut() {
+            setToken(null);
+            allFeedbacks = [];
+            document.getElementById('feedbackGrid').innerHTML = '';
+            showLogin();
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('tokenInput');
+            setToken(input.value.trim());
+            input.value = '';
+            showDashboard();
+        });
 
         async function loadFeedbacks() {
             const loading = document.getElementById('loading');
@@ -229,7 +318,16 @@
             grid.innerHTML = '';
 
             try {
-                const response = await fetch(API_URL);
+                const response = await fetch(API_URL, {
+                    headers: { 'Authorization': `Bearer ${getToken()}` }
+                });
+
+                if (response.status === 401) {
+                    setToken(null);
+                    showLogin('That token was not accepted. Please try again.');
+                    return;
+                }
+
                 const data = await response.json();
 
                 if (response.ok) {
@@ -307,7 +405,7 @@
 
             let csv = headers.join(',') + '\n';
             rows.forEach(row => {
-                csv += row.map(field => `"${field}"`).join(',') + '\n';
+                csv += row.map(csvField).join(',') + '\n';
             });
 
             const blob = new Blob([csv], { type: 'text/csv' });
@@ -317,6 +415,16 @@
             a.download = `feedbacks_${new Date().toISOString().split('T')[0]}.csv`;
             a.click();
             window.URL.revokeObjectURL(url);
+        }
+
+        function csvField(value) {
+            let text = String(value ?? '');
+            // Stop spreadsheets from running submitted text as a formula
+            if (/^[=+\-@\t\r]/.test(text)) {
+                text = "'" + text;
+            }
+            // Double any quotes, then wrap the field in quotes
+            return `"${text.replace(/"/g, '""')}"`;
         }
 
         function formatDate(timestamp) {
@@ -330,11 +438,12 @@
             return div.innerHTML;
         }
 
-        // Load feedbacks on page load
-        loadFeedbacks();
-
-        // Auto-refresh every 30 seconds
-        setInterval(loadFeedbacks, 30000);
+        // Start on the dashboard if already signed in this session
+        if (getToken()) {
+            showDashboard();
+        } else {
+            showLogin();
+        }
     </script>
 </body>
 </html>
