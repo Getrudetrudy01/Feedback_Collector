@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Widget Preview</title>
+    <style>
+        /* Deliberately aggressive page styles: the widget must look the same despite them */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Georgia, serif; background: #faf7f2; color: #3b2f2f; line-height: 1.6; }
+        button { background: hotpink; font-size: 30px; }
+        nav { background: #3b2f2f; color: #faf7f2; padding: 16px; display: flex; justify-content: space-between; }
+        main { max-width: 720px; margin: 40px auto; padding: 0 16px; }
+        h1 { font-size: 36px; margin-bottom: 16px; }
+        p { margin-bottom: 16px; }
+        .note { background: #fff3cd; border: 1px solid #ffe08a; padding: 12px 16px; border-radius: 8px; font-family: sans-serif; font-size: 14px; }
+        code { background: #eee; padding: 1px 4px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <nav><strong>Example Coffee Co.</strong><span>Menu · About · Contact</span></nav>
+    <main>
+        <p class="note" id="note">This is a preview page. The feedback button in the corner is the widget, exactly as it
+            appears on a customer's site. Feedback sent from here is real and shows up in the dashboard.</p>
+        <h1>Fresh coffee, every morning</h1>
+        <p>We roast small batches of single-origin beans every day and deliver them to your door within 48 hours.</p>
+        <p>Try the feedback button in the bottom corner of the page.</p>
+    </main>
+
+    <script src="config.js"></script>
+    <script>
+        // Load the widget the same way the embed snippet does, for the project in the URL
+        (function () {
+            const projectId = new URLSearchParams(location.search).get('project') || window.APP_CONFIG.defaultProjectId;
+            if (!projectId) {
+                document.getElementById('note').textContent =
+                    'Add ?project=YOUR_PROJECT_ID to this page\'s address to preview a project\'s widget.';
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = 'widget.js';
+            script.async = true;
+            script.dataset.project = projectId;
+            script.dataset.api = window.APP_CONFIG.apiUrl;
+            document.body.appendChild(script);
+        })();
+    </script>
+</body>
+</html>

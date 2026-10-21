@@ -1,11 +1,19 @@
 // Configured in config.js
 const apiUrl = window.APP_CONFIG.apiUrl;
+// The hosted form serves any project: index.html?project=proj_...
+const projectId = new URLSearchParams(location.search).get('project') || window.APP_CONFIG.defaultProjectId;
 
 const form = document.getElementById('feedbackForm');
 const submitBtn = document.getElementById('submitBtn');
 const btnText = document.getElementById('btnText');
 const btnLoader = document.getElementById('btnLoader');
 const messageDiv = document.getElementById('messageDiv');
+
+if (!projectId) {
+    submitBtn.disabled = true;
+    messageDiv.textContent = 'This feedback link is missing its project. Please check the link you were given.';
+    messageDiv.className = 'message error show';
+}
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -27,7 +35,7 @@ form.addEventListener('submit', async (e) => {
     };
 
     try {
-        const response = await fetch(apiUrl, {
+        const response = await fetch(`${apiUrl}/projects/${encodeURIComponent(projectId)}/feedback`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -40,8 +48,8 @@ form.addEventListener('submit', async (e) => {
         if (response.ok) {
             showMessage('✓ Feedback submitted successfully!', 'success');
             form.reset();
-        } else if (response.status === 400) {
-            // Validation error: show the server's reason
+        } else if (response.status < 500) {
+            // Validation, origin, or unknown-project error: show the server's reason
             showMessage(`✗ ${result.message}`, 'error');
         } else {
             throw new Error(result.message || 'Submission failed');
