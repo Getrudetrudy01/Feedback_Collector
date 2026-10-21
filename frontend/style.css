@@ -52,6 +52,7 @@ label {
 }
 
 input,
+select,
 textarea {
     width: 100%;
     padding: 12px;
@@ -64,6 +65,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
     outline: none;
     border-color: #1976d2;
@@ -73,6 +75,15 @@ textarea:focus {
 textarea {
     resize: vertical;
     min-height: 100px;
+}
+
+/* Spam trap: moved off-screen rather than display:none so bots still see it */
+.honeypot {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
 }
 
 fieldset {

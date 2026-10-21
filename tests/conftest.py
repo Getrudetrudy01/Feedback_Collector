@@ -26,6 +26,9 @@ def lf(monkeypatch):
             KeySchema=[{'AttributeName': 'feedbackId', 'KeyType': 'HASH'}],
             AttributeDefinitions=[{'AttributeName': 'feedbackId', 'AttributeType': 'S'}],
         )
+        topic_arn = boto3.client('sns').create_topic(Name='feedback')['TopicArn']
+        monkeypatch.setenv('NOTIFY_TOPIC_ARN', topic_arn)
+        monkeypatch.setenv('NOTIFY_MAX_RATING', '2')
         import lambda_function
         # Reload so module-level config picks up the env vars above
         yield importlib.reload(lambda_function)
@@ -34,11 +37,15 @@ def lf(monkeypatch):
 @pytest.fixture
 def call(lf):
     """Invoke the handler with an HTTP API (v2) style event."""
-    def _call(method, body=None, headers=None, admin=False):
+    def _call(method, body=None, headers=None, admin=False, path_id=None, query=None):
         event = {
             'requestContext': {'http': {'method': method}},
             'headers': {'origin': ORIGIN, **(headers or {})},
         }
+        if path_id is not None:
+            event['pathParameters'] = {'id': path_id}
+        if query is not None:
+            event['queryStringParameters'] = query
         if admin:
             event['headers']['authorization'] = f'Bearer {ADMIN_TOKEN}'
         if body is not None:

@@ -14,6 +14,27 @@ Parameters:
     Description: >-
       Origin allowed to call the API, e.g. http://my-bucket.s3-website-us-east-1.amazonaws.com.
       Leave as * until the frontend URL is known, then redeploy with the real origin.
+  NotificationEmail:
+    Type: String
+    Default: ''
+    Description: Email address to alert about new feedback (optional; confirm the subscription email)
+  NotifyMaxRating:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 5
+    Description: Only alert for ratings at or below this (5 = every submission, 2 = only 1-2 star feedback)
+  ThrottleRateLimit:
+    Type: Number
+    Default: 10
+    Description: Steady-state requests per second the API accepts (helps against spam floods)
+  ThrottleBurstLimit:
+    Type: Number
+    Default: 20
+    Description: Maximum burst of requests the API accepts
+
+Conditions:
+  HasNotificationEmail: !Not [!Equals [!Ref NotificationEmail, '']]
 
 Globals:
   Function:
@@ -40,12 +61,16 @@ Resources:
   FeedbackApi:
     Type: AWS::Serverless::HttpApi
     Properties:
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ThrottleRateLimit
+        ThrottlingBurstLimit: !Ref ThrottleBurstLimit
       CorsConfiguration:
         AllowOrigins:
           - !Ref AllowedOrigin
         AllowMethods:
           - GET
           - POST
+          - PATCH
           - OPTIONS
         AllowHeaders:
           - Content-Type
@@ -61,6 +86,8 @@ Resources:
           TABLE_NAME: !Ref FeedbackTable
           ADMIN_TOKEN: !Ref AdminToken
           ALLOWED_ORIGINS: !Ref AllowedOrigin
+          NOTIFY_TOPIC_ARN: !Ref FeedbackTopic
+          NOTIFY_MAX_RATING: !Ref NotifyMaxRating
       # Least privilege: only the actions the function uses, on this table only
       Policies:
         - Statement:
@@ -68,7 +95,11 @@ Resources:
               Action:
                 - dynamodb:PutItem
                 - dynamodb:Scan
+                - dynamodb:UpdateItem
               Resource: !GetAtt FeedbackTable.Arn
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref FeedbackTopic
       Events:
         SubmitFeedback:
           Type: HttpApi
@@ -82,6 +113,27 @@ Resources:
             ApiId: !Ref FeedbackApi
             Method: GET
             Path: /feedback
+        UpdateFeedback:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeedbackApi
+            Method: PATCH
+            Path: /feedback/{id}
+
+  # New-feedback alerts. The topic always exists (it's free with no subscribers);
+  # the email subscription is only created when NotificationEmail is set.
+  FeedbackTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Feedback Collector
+
+  FeedbackEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasNotificationEmail
+    Properties:
+      TopicArn: !Ref FeedbackTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
 
   # Static website hosting for the frontend/ folder
   FrontendBucket:

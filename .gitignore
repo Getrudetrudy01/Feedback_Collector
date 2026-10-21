@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 .aws-sam/
 samconfig.toml
+.ruff_cache/

@@ -21,7 +21,9 @@ form.addEventListener('submit', async (e) => {
         name: document.getElementById('name').value,
         email: document.getElementById('email').value,
         message: document.getElementById('message').value,
-        rating: Number(form.querySelector('input[name="rating"]:checked').value)
+        rating: Number(form.querySelector('input[name="rating"]:checked').value),
+        category: document.getElementById('category').value,
+        website: document.getElementById('website').value
     };
 
     try {

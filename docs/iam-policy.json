@@ -6,7 +6,8 @@
       "Effect": "Allow",
       "Action": [
         "dynamodb:PutItem",
-        "dynamodb:Scan"
+        "dynamodb:Scan",
+        "dynamodb:UpdateItem"
       ],
       "Resource": "arn:aws:dynamodb:us-east-1:YOUR_ACCOUNT_ID:table/FeedBackTable"
     }
