@@ -237,7 +237,7 @@
                     displayFeedbacks(allFeedbacks);
                     updateStats(allFeedbacks);
                 } else {
-                    throw new Error(data.error || 'Failed to load feedbacks');
+                    throw new Error(data.message || 'Failed to load feedbacks');
                 }
             } catch (err) {
                 error.textContent = `Error: ${err.message}`;

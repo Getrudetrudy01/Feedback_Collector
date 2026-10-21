@@ -75,6 +75,53 @@ textarea {
     min-height: 100px;
 }
 
+fieldset {
+    border: none;
+}
+
+legend {
+    color: #333;
+    font-weight: 500;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+/* Star rating: inputs are in reverse order (5 to 1) so the ~ selector
+   can highlight the hovered/checked star and every star to its left */
+.rating {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.rating input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.rating label {
+    font-size: 32px;
+    line-height: 1;
+    color: #ccc;
+    cursor: pointer;
+    margin: 0;
+    transition: color 0.2s;
+}
+
+.rating input:checked ~ label,
+.rating label:hover,
+.rating label:hover ~ label {
+    color: #f5a623;
+}
+
+.rating input:focus-visible + label {
+    outline: 2px solid #1976d2;
+    outline-offset: 2px;
+}
+
 button {
     width: 100%;
     padding: 14px;

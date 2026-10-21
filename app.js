@@ -21,12 +21,9 @@ form.addEventListener('submit', async (e) => {
         name: document.getElementById('name').value,
         email: document.getElementById('email').value,
         message: document.getElementById('message').value,
-        rating: "5",
-        timestamp: new Date().toISOString()
+        rating: Number(form.querySelector('input[name="rating"]:checked').value)
     };
-    
-    console.log('Sending data:', data); // Debug log
-    
+
     try {
         const response = await fetch(apiUrl, {
             method: 'POST',
@@ -36,21 +33,20 @@ form.addEventListener('submit', async (e) => {
             body: JSON.stringify(data)
         });
         
-        console.log('Response status:', response.status); // Debug log
-        
         const result = await response.json();
-        console.log('Response data:', result); // Debug log
-        
+
         if (response.ok) {
             showMessage('✓ Feedback submitted successfully!', 'success');
             form.reset();
+        } else if (response.status === 400) {
+            // Validation error: show the server's reason
+            showMessage(`✗ ${result.message}`, 'error');
         } else {
             throw new Error(result.message || 'Submission failed');
         }
     } catch (error) {
         showMessage('✗ Failed to submit feedback. Please try again.', 'error');
-        console.error('Full error details:', error);
-        console.error('Error message:', error.message);
+        console.error('Error submitting feedback:', error);
     } finally {
         // Reset button
         submitBtn.disabled = false;
