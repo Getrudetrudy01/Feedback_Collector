@@ -1,0 +1,5 @@
+boto3
+moto[dynamodb,sns]>=5
+pytest
+ruff
+cfn-lint

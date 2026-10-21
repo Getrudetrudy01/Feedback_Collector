@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+
+        .header,
+        .panel {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #1976d2;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .stat-number {
+            font-size: 36px;
+            font-weight: bold;
+            color: #1976d2;
+        }
+
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .breakdown-row {
+            display: grid;
+            grid-template-columns: 50px 1fr 50px;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 4px 0;
+            background: none;
+            color: #333;
+            font-weight: normal;
+            text-align: left;
+        }
+
+        .breakdown-row:hover {
+            background: #f5f5f5;
+        }
+
+        .breakdown-row.active {
+            background: #e3f2fd;
+        }
+
+        .bar-track {
+            height: 12px;
+            background: #eee;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background: #f5a623;
+            border-radius: 6px;
+        }
+
+        .bar-count {
+            text-align: right;
+            color: #666;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .filters input,
+        .filters select {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            background: white;
+        }
+
+        .filters input {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .result-count {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background-color: #1976d2;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #1565c0;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: white;
+            color: #1976d2;
+            border: 1px solid #1976d2;
+        }
+
+        button.secondary:hover {
+            background: #e3f2fd;
+        }
+
+        .feedback-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(min(350px, 100%), 1fr));
+            gap: 20px;
+        }
+
+        .feedback-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .feedback-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .feedback-card.resolved {
+            opacity: 0.7;
+        }
+
+        .feedback-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .feedback-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            overflow-wrap: anywhere;
+        }
+
+        .feedback-rating {
+            background: #ffd700;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .badges {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .badge {
+            font-size: 12px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            background: #eee;
+            color: #555;
+        }
+
+        .badge.status-new {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge.status-resolved {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .feedback-email {
+            color: #1976d2;
+            font-size: 14px;
+            margin-bottom: 15px;
+            overflow-wrap: anywhere;
+        }
+
+        .feedback-message {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            flex: 1;
+        }
+
+        .feedback-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: #999;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+
+        .feedback-meta button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #666;
+            font-size: 18px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1976d2;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: #666;
+            grid-column: 1 / -1;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .login {
+            max-width: 400px;
+            margin: 80px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .login h1 {
+            margin-bottom: 20px;
+        }
+
+        .login input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 15px;
+            margin: 8px 0 15px;
+        }
+
+        .login button {
+            width: 100%;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 16px;
+            }
+
+            .header,
+            .panel {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <form id="loginForm" class="login hidden">
+        <h1>Admin Sign In</h1>
+        <label for="tokenInput">Admin token</label>
+        <input type="password" id="tokenInput" required autocomplete="current-password">
+        <div id="loginError" class="error hidden"></div>
+        <button type="submit">Sign in</button>
+    </form>
+
+    <div id="dashboard" class="hidden">
+        <div class="header">
+            <h1>Feedback Dashboard</h1>
+            <p>Monitor and manage customer feedback</p>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalCount">0</div>
+                    <div class="stat-label">Total Feedbacks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="avgRating">0.0</div>
+                    <div class="stat-label">Average Rating</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="unresolvedCount">0</div>
+                    <div class="stat-label">Unresolved</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Rating breakdown</h2>
+            <div id="ratingBreakdown"></div>
+        </div>
+
+        <div class="controls">
+            <button id="refreshBtn">🔄 Refresh</button>
+            <button id="exportBtn">📥 Export CSV</button>
+            <button id="signOutBtn" class="secondary">Sign out</button>
+        </div>
+
+        <div class="filters">
+            <input type="search" id="searchInput" placeholder="Search name, email, or message" aria-label="Search">
+            <select id="ratingFilter" aria-label="Filter by rating">
+                <option value="">All ratings</option>
+                <option value="5">5 stars</option>
+                <option value="4">4 stars</option>
+                <option value="3">3 stars</option>
+                <option value="2">2 stars</option>
+                <option value="1">1 star</option>
+            </select>
+            <select id="categoryFilter" aria-label="Filter by category">
+                <option value="">All categories</option>
+                <option value="general">General</option>
+                <option value="bug">Bug report</option>
+                <option value="feature">Feature request</option>
+                <option value="praise">Praise</option>
+                <option value="other">Other</option>
+            </select>
+            <select id="statusFilter" aria-label="Filter by status">
+                <option value="">All statuses</option>
+                <option value="new">Unresolved</option>
+                <option value="resolved">Resolved</option>
+            </select>
+        </div>
+        <div id="resultCount" class="result-count"></div>
+
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            Loading feedbacks...
+        </div>
+
+        <div id="error" class="error hidden"></div>
+
+        <div id="feedbackGrid" class="feedback-grid"></div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>
