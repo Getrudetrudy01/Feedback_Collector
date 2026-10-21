@@ -1,5 +1,5 @@
-// REPLACE with your actual API Gateway URL
-const apiUrl = "https://qorp0jyrl2.execute-api.us-east-1.amazonaws.com/feedback";
+// Configured in config.js
+const apiUrl = window.APP_CONFIG.apiUrl;
 
 const form = document.getElementById('feedbackForm');
 const submitBtn = document.getElementById('submitBtn');

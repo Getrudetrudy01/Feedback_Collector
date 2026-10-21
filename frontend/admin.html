@@ -254,9 +254,10 @@
     <div id="feedbackGrid" class="feedback-grid"></div>
     </div>
 
+    <script src="config.js"></script>
     <script>
-        // REPLACE with your API Gateway URL
-        const API_URL = 'https://qorp0jyrl2.execute-api.us-east-1.amazonaws.com/feedback';
+        // Configured in config.js
+        const API_URL = window.APP_CONFIG.apiUrl;
 
         const TOKEN_KEY = 'feedbackAdminToken';
 

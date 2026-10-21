@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Feedback Collector - serverless feedback form and admin dashboard
+
+Parameters:
+  AdminToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Secret token for the admin dashboard (at least 16 characters)
+  AllowedOrigin:
+    Type: String
+    Default: '*'
+    Description: >-
+      Origin allowed to call the API, e.g. http://my-bucket.s3-website-us-east-1.amazonaws.com.
+      Leave as * until the frontend URL is known, then redeploy with the real origin.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 10
+    MemorySize: 256
+
+Resources:
+  FeedbackTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: feedbackId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: feedbackId
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  FeedbackApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref AllowedOrigin
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+
+  FeedbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/
+      Handler: lambda_function.lambda_handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FeedbackTable
+          ADMIN_TOKEN: !Ref AdminToken
+          ALLOWED_ORIGINS: !Ref AllowedOrigin
+      # Least privilege: only the actions the function uses, on this table only
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Scan
+              Resource: !GetAtt FeedbackTable.Arn
+      Events:
+        SubmitFeedback:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeedbackApi
+            Method: POST
+            Path: /feedback
+        ListFeedback:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeedbackApi
+            Method: GET
+            Path: /feedback
+
+  # Static website hosting for the frontend/ folder
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadForWebsite
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+
+Outputs:
+  ApiUrl:
+    Description: Put this in frontend/config.js as apiUrl
+    Value: !Sub 'https://${FeedbackApi}.execute-api.${AWS::Region}.amazonaws.com/feedback'
+  WebsiteUrl:
+    Description: Feedback form URL (admin dashboard is at /admin.html)
+    Value: !GetAtt FrontendBucket.WebsiteURL
+  FrontendBucketName:
+    Description: Upload the frontend/ folder here
+    Value: !Ref FrontendBucket
+  FeedbackTableName:
+    Value: !Ref FeedbackTable
