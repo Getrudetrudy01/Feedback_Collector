@@ -4,8 +4,8 @@ A serverless feedback collection system built with AWS Lambda, API Gateway, Dyna
 
 ## Live Demo
 
-- **Feedback Form**: http://my-feedback-collector.s3-website-us-east-1.amazonaws.com/
-- **Admin Dashboard**: https://my-feedback-collector.s3.us-east-1.amazonaws.com/admin.html (requires the admin token)
+- **Feedback Form**: http://feedback-collector-frontendbucket-9ucyy7ouo0cv.s3-website-us-east-1.amazonaws.com/
+- **Admin Dashboard**: http://feedback-collector-frontendbucket-9ucyy7ouo0cv.s3-website-us-east-1.amazonaws.com/admin.html (requires the admin token)
 
 ## Features
 
