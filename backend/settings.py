@@ -14,8 +14,9 @@ OWNER_TOKEN = os.environ.get('OWNER_TOKEN', '')
 PROJECTS_TABLE = os.environ.get('PROJECTS_TABLE', 'Projects')
 FEEDBACK_TABLE = os.environ.get('FEEDBACK_TABLE', 'ProjectFeedback')
 
-# The service's own website (hosted form and widget preview), always allowed to submit
-SITE_ORIGIN = os.environ.get('SITE_ORIGIN', '').rstrip('/').lower()
+# The service's own website addresses (hosted form and widget preview), always allowed
+# to submit. Comma-separated: the HTTPS (CloudFront) address and the older S3 one.
+SITE_ORIGINS = [o.strip().rstrip('/').lower() for o in os.environ.get('SITE_ORIGINS', '').split(',') if o.strip()]
 
 # Private bucket for screenshots attached to feedback
 SCREENSHOTS_BUCKET = os.environ.get('SCREENSHOTS_BUCKET', '')

@@ -7,7 +7,8 @@ from moto import mock_aws
 
 OWNER_TOKEN = 'test-owner-token-123'
 SITE = 'https://customer.example'
-HOSTED_SITE = 'http://feedback-service.example'
+HOSTED_SITE = 'https://feedback-service.example'
+HOSTED_SITE_OLD = 'http://feedback-service-old.example'
 
 
 @pytest.fixture
@@ -20,7 +21,7 @@ def settings(monkeypatch):
     monkeypatch.setenv('PROJECTS_TABLE', 'TestProjects')
     monkeypatch.setenv('FEEDBACK_TABLE', 'TestFeedback')
     monkeypatch.setenv('NOTIFY_MAX_RATING', '2')
-    monkeypatch.setenv('SITE_ORIGIN', HOSTED_SITE)
+    monkeypatch.setenv('SITE_ORIGINS', f'{HOSTED_SITE}, {HOSTED_SITE_OLD}/')
     monkeypatch.setenv('SCREENSHOTS_BUCKET', 'test-screenshots')
 
     with mock_aws():

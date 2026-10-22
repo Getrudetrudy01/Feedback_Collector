@@ -234,6 +234,9 @@ function renderProjectInfo() {
     document.title = `${project.name} · Feedback Dashboard`;
 
     $('embedSnippet').textContent = embedSnippet(project.projectId);
+    // Secure sites refuse http:// scripts; local testing over http is fine
+    const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+    $('insecureWarning').classList.toggle('hidden', location.protocol === 'https:' || isLocal);
     const hosted = siteUrl(`index.html?project=${encodeURIComponent(project.projectId)}`);
     $('hostedLink').href = hosted;
     $('hostedLink').textContent = hosted;
