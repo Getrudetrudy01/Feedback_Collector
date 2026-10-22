@@ -1,5 +1,6 @@
-// Set apiUrl to your API's /feedback endpoint.
-// After `sam deploy`, use the ApiUrl value from the stack outputs.
+// API base URL: the ApiUrl output of the CloudFormation stack (ends in /v1).
+// defaultProjectId: the project the hosted form uses when the link has no ?project=
 window.APP_CONFIG = {
-    apiUrl: 'https://jyyrgfajld.execute-api.us-east-1.amazonaws.com/feedback'
+    apiUrl: 'https://jyyrgfajld.execute-api.us-east-1.amazonaws.com/v1',
+    defaultProjectId: ''
 };

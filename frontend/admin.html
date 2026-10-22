@@ -345,6 +345,11 @@
             width: 100%;
         }
 
+        .login .muted {
+            font-size: 13px;
+            margin: -6px 0 18px;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -359,28 +364,243 @@
                 padding: 20px;
             }
         }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .muted {
+            color: #777;
+            font-weight: normal;
+        }
+
+        code {
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 13px;
+            background: #f1f3f5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            overflow-wrap: anywhere;
+        }
+
+        pre {
+            background: #1e1e1e;
+            color: #e6e6e6;
+            padding: 14px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            margin: 8px 0;
+        }
+
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+
+        .stack label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin: 12px 0 6px;
+        }
+
+        .stack input[type="text"],
+        .stack textarea,
+        .settings textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .stack button {
+            margin-top: 16px;
+        }
+
+        .stack label.checkbox,
+        label.checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: normal;
+            margin: 12px 0;
+        }
+
+        .callout {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 8px;
+            background: #fff8e1;
+            border: 1px solid #ffe082;
+        }
+
+        .callout h3 {
+            margin-bottom: 8px;
+        }
+
+        .callout p {
+            margin: 8px 0;
+        }
+
+        details.panel summary {
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        details.panel h3 {
+            font-size: 16px;
+            color: #333;
+            margin: 24px 0 6px;
+        }
+
+        details.panel p {
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .settings textarea {
+            margin: 8px 0;
+        }
+
+        button.small {
+            padding: 6px 12px;
+            font-size: 13px;
+        }
+
+        button.danger {
+            background: #c62828;
+        }
+
+        button.danger:hover {
+            background: #b71c1c;
+        }
+
+        .link-btn {
+            background: none;
+            color: #1976d2;
+            padding: 0;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .link-btn:hover {
+            background: none;
+            text-decoration: underline;
+        }
+
+        .project-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+            gap: 20px;
+        }
+
+        .project-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .project-card h3 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 8px;
+            overflow-wrap: anywhere;
+        }
+
+        .project-card p {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 6px;
+        }
+
+        .project-card button {
+            margin-top: 10px;
+        }
+
+        .feedback-page {
+            font-size: 12px;
+            color: #777;
+            margin-bottom: 10px;
+            overflow-wrap: anywhere;
+        }
+
+        .feedback-page a {
+            color: #1976d2;
+        }
     </style>
 </head>
 <body>
     <form id="loginForm" class="login hidden">
-        <h1>Admin Sign In</h1>
-        <label for="tokenInput">Admin token</label>
+        <h1>Sign In</h1>
+        <label for="tokenInput">Owner token or project admin key</label>
         <input type="password" id="tokenInput" required autocomplete="current-password">
+        <p class="muted">Project admin keys start with <code>sk_</code>.</p>
         <div id="loginError" class="error hidden"></div>
         <button type="submit">Sign in</button>
     </form>
 
+    <!-- Owner only: every project, plus creating new ones -->
+    <div id="projectsView" class="hidden">
+        <div class="header">
+            <div class="header-row">
+                <div>
+                    <h1>Projects</h1>
+                    <p>Each project is one website, with its own widget, admin key, and dashboard.</p>
+                </div>
+                <button class="secondary sign-out-btn">Sign out</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Create a project</h2>
+            <form id="createProjectForm" class="stack">
+                <label for="newProjectName">Name</label>
+                <input type="text" id="newProjectName" required maxlength="100" placeholder="e.g. Acme Inc website">
+
+                <label for="newProjectOrigins">
+                    Allowed websites <span class="muted">(one per line, e.g. https://www.acme.com; leave empty to allow any site)</span>
+                </label>
+                <textarea id="newProjectOrigins" rows="3" placeholder="https://www.acme.com"></textarea>
+
+                <label class="checkbox"><input type="checkbox" id="newProjectNotify"> Email me new feedback for this project</label>
+
+                <button type="submit" id="createProjectBtn">Create project</button>
+            </form>
+            <div id="newProjectResult" class="callout hidden"></div>
+        </div>
+
+        <div id="projectsError" class="error hidden"></div>
+        <div id="projectList" class="project-list"></div>
+    </div>
+
+    <!-- One project's feedback (owner after picking a project, or a customer's key) -->
     <div id="dashboard" class="hidden">
         <div class="header">
-            <h1>Feedback Dashboard</h1>
-            <p>Monitor and manage customer feedback</p>
+            <div class="header-row">
+                <div>
+                    <button id="backToProjectsBtn" class="link-btn hidden">← All projects</button>
+                    <h1 id="projectName">Feedback Dashboard</h1>
+                    <p class="muted">Project ID: <code id="projectIdLabel"></code></p>
+                </div>
+            </div>
             <div class="stats">
                 <div class="stat-card">
                     <div class="stat-number" id="totalCount">0</div>
                     <div class="stat-label">Total Feedbacks</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number" id="avgRating">0.0</div>
+                    <div class="stat-number" id="avgRating">–</div>
                     <div class="stat-label">Average Rating</div>
                 </div>
                 <div class="stat-card">
@@ -390,6 +610,37 @@
             </div>
         </div>
 
+        <details class="panel" id="installPanel">
+            <summary>Install &amp; settings</summary>
+
+            <h3>Embed the widget</h3>
+            <p>Paste this just before <code>&lt;/body&gt;</code> on every page where the feedback button should appear:</p>
+            <pre><code id="embedSnippet"></code></pre>
+            <button id="copySnippetBtn" class="secondary small">Copy snippet</button>
+            <p>
+                <a id="previewLink" target="_blank" rel="noopener">Preview the widget on a test page</a>
+            </p>
+
+            <h3>Hosted feedback page</h3>
+            <p>Or share this link, for example in emails:</p>
+            <p><a id="hostedLink" target="_blank" rel="noopener"></a></p>
+
+            <h3>Allowed websites</h3>
+            <div class="settings">
+                <p>Only these websites can send feedback through this project's widget. One per line, like
+                    <code>https://www.example.com</code>. Leave empty to allow any site.</p>
+                <textarea id="originsInput" rows="3" aria-label="Allowed websites"></textarea>
+                <label class="checkbox owner-only hidden"><input type="checkbox" id="notifyInput"> Email me new feedback for this project</label>
+                <button id="saveSettingsBtn">Save settings</button>
+                <span id="settingsStatus" class="muted" role="status"></span>
+            </div>
+
+            <h3>Admin key</h3>
+            <p>Rotating creates a new admin key and immediately disables the old one.</p>
+            <button id="rotateKeyBtn" class="danger">Rotate admin key</button>
+            <div id="rotateResult" class="callout hidden"></div>
+        </details>
+
         <div class="panel">
             <h2>Rating breakdown</h2>
             <div id="ratingBreakdown"></div>
@@ -398,11 +649,11 @@
         <div class="controls">
             <button id="refreshBtn">🔄 Refresh</button>
             <button id="exportBtn">📥 Export CSV</button>
-            <button id="signOutBtn" class="secondary">Sign out</button>
+            <button class="secondary sign-out-btn">Sign out</button>
         </div>
 
         <div class="filters">
-            <input type="search" id="searchInput" placeholder="Search name, email, or message" aria-label="Search">
+            <input type="search" id="searchInput" placeholder="Search name, email, message, or page" aria-label="Search">
             <select id="ratingFilter" aria-label="Filter by rating">
                 <option value="">All ratings</option>
                 <option value="5">5 stars</option>
@@ -410,6 +661,7 @@
                 <option value="3">3 stars</option>
                 <option value="2">2 stars</option>
                 <option value="1">1 star</option>
+                <option value="none">No rating</option>
             </select>
             <select id="categoryFilter" aria-label="Filter by category">
                 <option value="">All categories</option>

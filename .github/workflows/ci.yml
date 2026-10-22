@@ -32,3 +32,7 @@ jobs:
 
       - name: Check JavaScript syntax
         run: for f in frontend/*.js; do node --check "$f"; done
+
+      - name: Check the widget is pure ASCII
+        # Customer pages may not declare a charset; non-ASCII text would get garbled
+        run: "! grep -nP '[^\\x00-\\x7F]' frontend/widget.js"
