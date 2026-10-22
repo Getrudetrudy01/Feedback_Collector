@@ -96,7 +96,8 @@ Uploads that never get attached to feedback are deleted from `pending/` after a 
 | POST  | `/v1/projects/{projectId}/rotate-key` | owner or project key | Replace the admin key |
 | POST  | `/v1/projects/{projectId}/screenshots` | none (origin-checked) | Get a one-time screenshot upload slot |
 | POST  | `/v1/projects/{projectId}/feedback` | none (origin-checked) | Submit feedback (optional `context`, `screenshotId`) |
-| GET   | `/v1/projects/{projectId}/feedback` | owner or project key | List feedback, newest first (`limit`, `nextToken`) |
+| GET   | `/v1/projects/{projectId}/feedback` | owner or project key | List feedback, newest first (`limit`, `nextToken`). Optional filters: `status`, `category`, `rating` (`1`–`5` or `none`), `q` (case-insensitive search of name, email, message, and page); `since` returns only items newer than that feedback ID |
+| GET   | `/v1/projects/{projectId}/stats` | owner or project key | Totals for the dashboard: count, unresolved, ratings, and the newest feedback ID |
 | PATCH | `/v1/projects/{projectId}/feedback/{feedbackId}` | owner or project key | Set `status` to `new` or `resolved` |
 
 Authenticated requests send `Authorization: Bearer <owner token or admin key>`.

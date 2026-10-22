@@ -19,6 +19,7 @@ ROUTES = {
     'PATCH /v1/projects/{projectId}': lambda e, p, path: projects.update_project(e, p, path['projectId']),
     'POST /v1/projects/{projectId}/rotate-key': lambda e, p, path: projects.rotate_key(p, path['projectId']),
     'GET /v1/projects/{projectId}/feedback': lambda e, p, path: feedback.list_feedback(e, p, path['projectId']),
+    'GET /v1/projects/{projectId}/stats': lambda e, p, path: feedback.feedback_stats(p, path['projectId']),
     'PATCH /v1/projects/{projectId}/feedback/{feedbackId}':
         lambda e, p, path: feedback.update_feedback(e, p, path['projectId'], path['feedbackId']),
 }

@@ -33,6 +33,11 @@ STATUSES = ('new', 'resolved')
 
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
+# Upper bound on items read by one filtered list request, to keep it fast
+MAX_EXAMINED = 2000
+MAX_SEARCH_LENGTH = 200
+SEARCH_FIELDS = ('name', 'email', 'message', 'pageUrl')
+FEEDBACK_ID_PATTERN = re.compile(r'^\d{13}-[0-9a-f]{1,32}$')
 
 # Technical context sent by the widget to help reproduce problems
 SIZE_PATTERN = re.compile(r'^\d{1,5}x\d{1,5}$')
@@ -195,15 +200,64 @@ def submit_feedback(event, project_id):
     return response(201, {'message': 'Feedback submitted successfully', 'feedbackId': item['feedbackId']})
 
 
+def list_filters(params):
+    """Optional filters from the query string; returns a function that tests one item."""
+    status = params.get('status')
+    if status and status not in STATUSES:
+        raise ApiError(400, f'status must be one of: {", ".join(STATUSES)}')
+    category = params.get('category')
+    if category and category not in CATEGORIES:
+        raise ApiError(400, f'category must be one of: {", ".join(CATEGORIES)}')
+    rating = params.get('rating')
+    if rating and rating not in ('1', '2', '3', '4', '5', 'none'):
+        raise ApiError(400, 'rating must be a whole number from 1 to 5, or none')
+    search = (params.get('q') or '').strip().lower()
+    if len(search) > MAX_SEARCH_LENGTH:
+        raise ApiError(400, f'q must be at most {MAX_SEARCH_LENGTH} characters')
+
+    if not (status or category or rating or search):
+        return None
+
+    def matches(item):
+        # Older items may lack status or category
+        if status and item.get('status', 'new') != status:
+            return False
+        if category and item.get('category', 'general') != category:
+            return False
+        if rating == 'none' and item.get('rating') is not None:
+            return False
+        if rating and rating != 'none' and item.get('rating') != int(rating):
+            return False
+        if search and not any(search in str(item.get(field) or '').lower() for field in SEARCH_FIELDS):
+            return False
+        return True
+    return matches
+
+
 def list_feedback(event, principal, project_id):
-    """Return one page of a project's feedback, newest first."""
+    """Return one page of a project's feedback, newest first.
+
+    Filters are applied here rather than in DynamoDB so search can ignore case. A filtered
+    request reads at most MAX_EXAMINED items; when it stops early it returns a nextToken
+    even if the page isn't full, and the caller continues from there.
+    """
     auth.require_access(principal, project_id)
     params = event.get('queryStringParameters') or {}
+    limit = page_limit(params, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
+    matches = list_filters(params)
+
+    key_condition = Key('projectId').eq(project_id)
+    # Only items newer than one the caller already has, for cheap polling
+    since = params.get('since')
+    if since:
+        if not FEEDBACK_ID_PATTERN.match(since):
+            raise ApiError(400, 'since must be a feedback ID')
+        key_condition = key_condition & Key('feedbackId').gt(since)
 
     query_kwargs = {
-        'KeyConditionExpression': Key('projectId').eq(project_id),
+        'KeyConditionExpression': key_condition,
         'ScanIndexForward': False,
-        'Limit': page_limit(params, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE)
+        'Limit': limit if matches is None else MAX_PAGE_SIZE
     }
     if params.get('nextToken'):
         start_key = decode_page_token(params['nextToken'])
@@ -213,9 +267,25 @@ def list_feedback(event, principal, project_id):
             raise ApiError(400, 'nextToken is invalid')
         query_kwargs['ExclusiveStartKey'] = start_key
 
-    result = settings.feedback_table.query(**query_kwargs)
-    last_key = result.get('LastEvaluatedKey')
-    items = result.get('Items', [])
+    items, last_key, examined = [], None, 0
+    while True:
+        result = settings.feedback_table.query(**query_kwargs)
+        last_key = result.get('LastEvaluatedKey')
+        if matches is None:
+            items = result.get('Items', [])
+            break
+        for item in result.get('Items', []):
+            examined += 1
+            if matches(item):
+                items.append(item)
+                if len(items) == limit:
+                    # Full page: continue after this item next time
+                    last_key = {'projectId': project_id, 'feedbackId': item['feedbackId']}
+                    break
+        if len(items) == limit or not last_key or examined >= MAX_EXAMINED:
+            break
+        query_kwargs['ExclusiveStartKey'] = last_key
+
     for item in items:
         if item.get('screenshotKey'):
             item['screenshotUrl'] = screenshots.view_url(item['screenshotKey'])
@@ -223,6 +293,36 @@ def list_feedback(event, principal, project_id):
         'feedbacks': items,
         'nextToken': encode_page_token(last_key) if last_key else None
     })
+
+
+def feedback_stats(principal, project_id):
+    """Totals for the dashboard header, so it doesn't need to download every item."""
+    auth.require_access(principal, project_id)
+    total = unresolved = 0
+    ratings = {str(n): 0 for n in range(1, 6)}
+    latest_id = None
+    query_kwargs = {
+        'KeyConditionExpression': Key('projectId').eq(project_id),
+        'ScanIndexForward': False,
+        'ProjectionExpression': 'feedbackId, rating, #status',
+        'ExpressionAttributeNames': {'#status': 'status'}
+    }
+    while True:
+        result = settings.feedback_table.query(**query_kwargs)
+        for item in result.get('Items', []):
+            latest_id = latest_id or item['feedbackId']
+            total += 1
+            if item.get('status', 'new') != 'resolved':
+                unresolved += 1
+            if str(item.get('rating')) in ratings:
+                ratings[str(item['rating'])] += 1
+        if 'LastEvaluatedKey' not in result:
+            break
+        query_kwargs['ExclusiveStartKey'] = result['LastEvaluatedKey']
+
+    # The dashboard polls with ?since=latestFeedbackId to pick up only new items
+    return response(200, {'total': total, 'unresolved': unresolved, 'ratings': ratings,
+                          'latestFeedbackId': latest_id})
 
 
 def update_feedback(event, principal, project_id, feedback_id):
