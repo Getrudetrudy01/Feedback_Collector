@@ -681,6 +681,12 @@
 
             <h3>Embed the widget</h3>
             <p>Paste this just before <code>&lt;/body&gt;</code> on every page where the feedback button should appear:</p>
+            <div id="insecureWarning" class="callout hidden">
+                <strong>This dashboard is open on an <code>http://</code> address,</strong> so the snippet below
+                points to an insecure script that most websites (which use <code>https://</code>) will block.
+                Open the dashboard at its <code>https://</code> address (the <code>WebsiteUrl</code> from your
+                deployment) and copy the snippet from there.
+            </div>
             <pre><code id="embedSnippet"></code></pre>
             <button id="copySnippetBtn" class="secondary small">Copy snippet</button>
             <p>

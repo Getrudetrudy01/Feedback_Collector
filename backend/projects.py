@@ -36,7 +36,7 @@ def check_origin(event, project):
     if not allowed:
         return
     origin = (get_header(event, 'origin') or '').rstrip('/').lower()
-    if origin not in allowed and not (settings.SITE_ORIGIN and origin == settings.SITE_ORIGIN):
+    if origin not in allowed and origin not in settings.SITE_ORIGINS:
         raise ApiError(403, 'This website is not allowed to send feedback to this project')
 
 

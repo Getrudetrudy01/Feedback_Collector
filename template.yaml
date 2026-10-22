@@ -102,7 +102,7 @@ Resources:
       Environment:
         Variables:
           OWNER_TOKEN: !Ref OwnerToken
-          SITE_ORIGIN: !GetAtt FrontendBucket.WebsiteURL
+          SITE_ORIGINS: !Sub 'https://${FrontendDistribution.DomainName},${FrontendBucket.WebsiteURL}'
           SCREENSHOTS_BUCKET: !Ref ScreenshotsBucket
           PROJECTS_TABLE: !Ref ProjectsTable
           FEEDBACK_TABLE: !Ref ProjectFeedbackTable
@@ -240,7 +240,8 @@ Resources:
             Prefix: pending/
             ExpirationInDays: 1
 
-  # Static website hosting for the frontend/ folder (hosted form, dashboard, widget.js)
+  # Static website hosting for the frontend/ folder (hosted form, dashboard, widget.js).
+  # Visitors use the HTTPS CloudFront address below; the S3 address is HTTP-only.
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -265,16 +266,63 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub '${FrontendBucket.Arn}/*'
 
+  # Short cache times so deployed changes show up within minutes without invalidating
+  FrontendCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${AWS::StackName}-frontend'
+        DefaultTTL: 300
+        MaxTTL: 3600
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          # Pages read ?project= in the browser, so the same file serves every project
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          CookiesConfig:
+            CookieBehavior: none
+
+  # HTTPS in front of the website. Needed because browsers block HTTPS sites from
+  # loading an http:// widget.js, and only allow screen capture on secure pages.
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Feedback Collector website and widget
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: FrontendWebsite
+            # The S3 website endpoint's host name, e.g. bucket.s3-website-us-east-1.amazonaws.com
+            DomainName: !Select [2, !Split ['/', !GetAtt FrontendBucket.WebsiteURL]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendWebsite
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref FrontendCachePolicy
+
 Outputs:
   ApiUrl:
     Description: Put this in frontend/config.js as apiUrl
     Value: !Sub 'https://${FeedbackApi}.execute-api.${AWS::Region}.amazonaws.com/v1'
   WebsiteUrl:
-    Description: Hosted form (add ?project=ID) and dashboard (/admin.html)
-    Value: !GetAtt FrontendBucket.WebsiteURL
+    Description: Dashboard is at /admin.html; hosted form at /index.html?project=ID
+    Value: !Sub 'https://${FrontendDistribution.DomainName}'
   WidgetUrl:
     Description: Script customers embed on their sites
-    Value: !Sub '${FrontendBucket.WebsiteURL}/widget.js'
+    Value: !Sub 'https://${FrontendDistribution.DomainName}/widget.js'
+  DistributionId:
+    Description: For clearing the CloudFront cache after uploading changes
+    Value: !Ref FrontendDistribution
   FrontendBucketName:
     Description: Upload the frontend/ folder here
     Value: !Ref FrontendBucket

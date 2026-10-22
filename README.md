@@ -4,8 +4,10 @@ An embeddable feedback widget for websites, built on AWS Lambda, API Gateway, Dy
 
 ## Live Demo
 
-- **Dashboard**: http://feedback-collector-frontendbucket-9ucyy7ouo0cv.s3-website-us-east-1.amazonaws.com/admin.html (sign in with the owner token or a project admin key)
-- **Widget script**: http://feedback-collector-frontendbucket-9ucyy7ouo0cv.s3-website-us-east-1.amazonaws.com/widget.js
+The site is served over HTTPS through CloudFront; the addresses are the `WebsiteUrl` and `WidgetUrl` stack outputs.
+
+- **Dashboard**: `WebsiteUrl/admin.html` (sign in with the owner token or a project admin key)
+- **Widget script**: `WebsiteUrl/widget.js`
 
 Each project's hosted feedback page and widget preview are linked from its **Install & settings** panel in the dashboard.
 
@@ -167,9 +169,15 @@ You need an AWS account and the [AWS CLI](https://aws.amazon.com/cli/), signed i
    aws s3 sync frontend/ s3://YOUR_FrontendBucketName/
    ```
 
-6. **Create your first project.** Open `WebsiteUrl/admin.html`, sign in with the owner token, and create a project. Copy its admin key and snippet when shown.
+6. **Create your first project.** Open `WebsiteUrl/admin.html` (the `https://` address), sign in with the owner token, and create a project. Copy its admin key and snippet when shown.
 
-Re-run steps 2 and 5 after code changes.
+Re-run steps 2 and 5 after code changes. CloudFront caches files for up to 5 minutes; to see changes immediately, clear its cache with the `DistributionId` output:
+
+```powershell
+aws cloudfront create-invalidation --distribution-id YOUR_DistributionId --paths "/*"
+```
+
+Always copy snippets from the `https://` dashboard: secure websites block scripts loaded over `http://`, and browsers only allow screen capture on secure pages. The older `http://...s3-website...` address still works, but the dashboard warns when it's used.
 
 ## Development
 

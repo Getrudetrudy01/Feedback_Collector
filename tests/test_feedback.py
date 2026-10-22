@@ -1,5 +1,5 @@
 import pytest
-from conftest import HOSTED_SITE, OWNER_TOKEN, SITE
+from conftest import HOSTED_SITE, HOSTED_SITE_OLD, OWNER_TOKEN, SITE
 
 FEEDBACK = '/v1/projects/{projectId}/feedback'
 ITEM = '/v1/projects/{projectId}/feedback/{feedbackId}'
@@ -68,6 +68,7 @@ def test_origin_allowlist(make_project, submit):
     assert submit(project['projectId'], origin=None)[0] == 403
     # The service's own hosted form and preview page always work
     assert submit(project['projectId'], origin=HOSTED_SITE)[0] == 201
+    assert submit(project['projectId'], origin=HOSTED_SITE_OLD)[0] == 201
 
 
 def test_empty_allowlist_accepts_any_origin(make_project, submit):
