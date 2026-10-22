@@ -14,6 +14,10 @@
  *   FeedbackWidget.open() / FeedbackWidget.close()
  *   FeedbackWidget.identify({ name, email })   Attach the signed-in user's details
  *
+ * Every report includes the screen and window size and time zone (the server adds the
+ * browser and language). Bug reports can also include a screenshot and the page's
+ * recent JavaScript errors.
+ *
  * Keep this file pure ASCII (write symbols as \u{...} escapes): host pages may not
  * declare a charset, and then browsers decode the script with the wrong encoding.
  */
@@ -43,6 +47,64 @@
     let identity = {};
     let isOpen = false;
     let closeTimer = null;
+
+    // Remember the page's recent JavaScript errors for bug reports. Listeners only:
+    // the host page's own error handling is left untouched.
+    const MAX_ERRORS = 10;
+    const recentErrors = [];
+    function rememberError(entry) {
+        recentErrors.push(entry);
+        if (recentErrors.length > MAX_ERRORS) recentErrors.shift();
+    }
+    window.addEventListener('error', (e) => {
+        // Failed images and scripts also fire 'error', but without a message
+        if (!e.message) return;
+        rememberError({
+            message: String(e.message).slice(0, 500),
+            source: e.filename ? String(e.filename).slice(0, 500) : undefined,
+            line: Number.isInteger(e.lineno) ? e.lineno : undefined
+        });
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+        const reason = e.reason && e.reason.message ? e.reason.message : String(e.reason);
+        rememberError({ message: `Unhandled promise rejection: ${reason}`.slice(0, 500) });
+    });
+
+    function technicalContext(includeErrors) {
+        const context = {
+            screen: `${Math.round(screen.width)}x${Math.round(screen.height)}`,
+            viewport: `${Math.round(window.innerWidth)}x${Math.round(window.innerHeight)}`
+        };
+        try {
+            context.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        } catch { /* very old browser: skip */ }
+        if (includeErrors && recentErrors.length) context.errors = recentErrors.slice();
+        return context;
+    }
+
+    // Screenshots are re-encoded as JPEG: smaller, and it drops photo metadata such as GPS location
+    const MAX_SHOT_WIDTH = 1920;
+    const MAX_SHOT_HEIGHT = 4000;
+    const MAX_SHOT_BYTES = 5 * 1024 * 1024;
+    const canCapture = Boolean(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+
+    function toJpeg(source, width, height) {
+        const scale = Math.min(1, MAX_SHOT_WIDTH / width, MAX_SHOT_HEIGHT / height);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const ctx = canvas.getContext('2d');
+        // Transparent PNGs would turn black as JPEG; give them a white background
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+        return new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not process the image.'))),
+                'image/jpeg', 0.85);
+        });
+    }
+
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     const STYLES = `
         :host { all: initial; }
@@ -102,6 +164,23 @@
         }
         .submit:disabled { opacity: 0.6; cursor: not-allowed; }
 
+        .label-text { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; }
+        .shot-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+        .secondary {
+            padding: 8px 12px; border: 1px solid ${color}; border-radius: 8px; background: #fff;
+            color: ${color}; font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .secondary:hover { background: #f5f8ff; }
+        .secondary:disabled { opacity: 0.6; cursor: wait; }
+        .shot-preview { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+        .shot-preview[hidden], .shot-buttons[hidden], .field[hidden], .secondary[hidden] { display: none; }
+        .shot-preview img {
+            width: 96px; height: 64px; object-fit: cover; object-position: top;
+            border: 1px solid #ddd; border-radius: 6px; background: #f5f5f5;
+        }
+        .shot-preview span { flex: 1; font-size: 13px; color: #444; }
+        .hint { margin: 8px 0 0; font-size: 12px; color: #777; line-height: 1.4; }
+
         .status { margin-top: 12px; font-size: 14px; padding: 10px; border-radius: 8px; }
         .status[hidden] { display: none; }
         .status.error { background: #fdecea; color: #8a1c1c; }
@@ -151,6 +230,20 @@
                     <textarea id="fw-message" name="message" maxlength="2000" required
                               placeholder="Tell us what you think..."></textarea>
                 </div>
+                <div class="field screenshot-field" hidden>
+                    <span class="label-text">Screenshot <span class="optional">(optional)</span></span>
+                    <div class="shot-buttons">
+                        <button type="button" class="secondary capture">Capture this page</button>
+                        <button type="button" class="secondary attach">Attach an image</button>
+                        <input type="file" class="file" accept="image/png,image/jpeg,image/webp" hidden>
+                    </div>
+                    <div class="shot-preview" hidden>
+                        <img alt="Screenshot preview">
+                        <span class="shot-label">Screenshot attached</span>
+                        <button type="button" class="secondary remove-shot">Remove</button>
+                    </div>
+                    <p class="hint">Recent errors from this page are included to help fix the problem.</p>
+                </div>
                 <div class="field email-field">
                     <label for="fw-email">Email <span class="optional">(optional, if you'd like a reply)</span></label>
                     <input type="email" id="fw-email" name="email" maxlength="254" autocomplete="email">
@@ -160,6 +253,7 @@
                     <input type="text" id="fw-website" name="website" tabindex="-1" autocomplete="off">
                 </div>
                 <button class="submit" type="submit">Send feedback</button>
+                <p class="hint">Your browser type and screen size are sent along to help us understand your feedback.</p>
                 <div class="status" role="alert" hidden></div>
             </form>
             <div class="thanks" hidden>
@@ -190,6 +284,128 @@
         // Text set via textContent, so attribute values can't inject markup
         $('.launcher-label').textContent = label;
         $('#fw-title').textContent = title;
+
+        const screenshotField = $('.screenshot-field');
+        const captureButton = $('.capture');
+        const fileInput = $('.file');
+        const preview = $('.shot-preview');
+        let screenshot = null;
+        let previewUrl = null;
+
+        // Screen capture isn't available on phones; attaching an image still is
+        captureButton.hidden = !canCapture;
+
+        function isBugReport() {
+            return form.category.value === 'bug';
+        }
+
+        function setScreenshot(blob) {
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+            screenshot = blob;
+            previewUrl = blob ? URL.createObjectURL(blob) : null;
+            preview.hidden = !blob;
+            $('.shot-buttons').hidden = Boolean(blob);
+            if (blob) {
+                $('.shot-preview img').src = previewUrl;
+                $('.shot-label').textContent = `Screenshot attached (${Math.max(1, Math.round(blob.size / 1024))} KB)`;
+            } else {
+                $('.shot-preview img').removeAttribute('src');
+                fileInput.value = '';
+            }
+        }
+
+        form.category.addEventListener('change', () => {
+            screenshotField.hidden = !isBugReport();
+        });
+
+        captureButton.addEventListener('click', async () => {
+            status.hidden = true;
+            captureButton.disabled = true;
+            // Keep the widget out of its own screenshot
+            launcher.style.visibility = 'hidden';
+            panel.style.visibility = 'hidden';
+            let stream = null;
+            try {
+                // The browser asks the visitor which tab or screen to share; nothing is taken without that click
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { displaySurface: 'browser' },
+                    audio: false,
+                    preferCurrentTab: true,
+                    selfBrowserSurface: 'include'
+                });
+                const video = document.createElement('video');
+                video.muted = true;
+                video.playsInline = true;
+                video.srcObject = stream;
+                await video.play();
+                // Let the page repaint without the widget and the browser's share prompt
+                await wait(400);
+                setScreenshot(await toJpeg(video, video.videoWidth, video.videoHeight));
+            } catch (err) {
+                // Cancelling the share prompt is a normal choice, not an error
+                if (err && err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
+                    showError('Could not capture the screen. Try attaching an image instead.');
+                }
+            } finally {
+                if (stream) stream.getTracks().forEach((track) => track.stop());
+                launcher.style.visibility = '';
+                panel.style.visibility = '';
+                captureButton.disabled = false;
+            }
+        });
+
+        $('.attach').addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) return;
+            status.hidden = true;
+            if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+                showError('Please choose a PNG, JPEG, or WebP image.');
+                fileInput.value = '';
+                return;
+            }
+            try {
+                const image = await createImageBitmap(file);
+                setScreenshot(await toJpeg(image, image.width, image.height));
+                image.close();
+            } catch {
+                showError('That image could not be read. Please try another one.');
+                fileInput.value = '';
+            }
+        });
+
+        $('.remove-shot').addEventListener('click', () => setScreenshot(null));
+
+        async function errorMessage(response, fallback) {
+            const data = await response.json().catch(() => ({}));
+            // Validation and origin errors are written for people; show them
+            return response.status < 500 && data.message ? data.message : fallback;
+        }
+
+        // Upload straight to storage with a one-time, size-limited permission from the API
+        async function uploadScreenshot(blob) {
+            if (blob.size > MAX_SHOT_BYTES) {
+                throw new Error('The screenshot is too large. Please attach a smaller image.');
+            }
+            const slotResponse = await fetch(`${apiUrl}/projects/${encodeURIComponent(projectId)}/screenshots`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contentType: 'image/jpeg' })
+            });
+            if (!slotResponse.ok) {
+                throw new Error(await errorMessage(slotResponse, 'The screenshot could not be uploaded.'));
+            }
+            const slot = await slotResponse.json();
+            const upload = new FormData();
+            Object.entries(slot.upload.fields).forEach(([key, value]) => upload.append(key, value));
+            // Storage requires the file to be the last field
+            upload.append('file', blob, 'screenshot.jpg');
+            const uploadResponse = await fetch(slot.upload.url, { method: 'POST', body: upload });
+            if (!uploadResponse.ok) {
+                throw new Error('The screenshot could not be uploaded. Remove it and try again.');
+            }
+            return slot.screenshotId;
+        }
 
         function showError(message) {
             status.textContent = message;
@@ -242,10 +458,12 @@
             }
 
             const rating = form.querySelector('input[name="rating"]:checked');
+            const bugReport = isBugReport();
             const body = {
                 message,
                 category: form.category.value,
                 pageUrl: location.href.slice(0, 2000),
+                context: technicalContext(bugReport),
                 website: form.website.value
             };
             if (rating) body.rating = Number(rating.value);
@@ -255,18 +473,22 @@
             submitButton.disabled = true;
             submitButton.textContent = 'Sending...';
             try {
+                if (bugReport && screenshot) {
+                    submitButton.textContent = 'Uploading screenshot...';
+                    body.screenshotId = await uploadScreenshot(screenshot);
+                    submitButton.textContent = 'Sending...';
+                }
                 const response = await fetch(`${apiUrl}/projects/${encodeURIComponent(projectId)}/feedback`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
                 if (!response.ok) {
-                    const data = await response.json().catch(() => ({}));
-                    // Validation and origin errors are written for people; show them
-                    throw new Error(response.status < 500 && data.message
-                        ? data.message : 'Something went wrong. Please try again.');
+                    throw new Error(await errorMessage(response, 'Something went wrong. Please try again.'));
                 }
                 form.reset();
+                setScreenshot(null);
+                screenshotField.hidden = true;
                 form.hidden = true;
                 thanks.hidden = false;
                 closeTimer = setTimeout(close, 2500);

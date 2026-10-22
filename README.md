@@ -15,9 +15,11 @@ Each project's hosted feedback page and widget preview are linked from its **Ins
 - **Embeddable widget**: a floating feedback button with category, optional star rating, message, and optional email. It's isolated in a Shadow DOM, so the host site's CSS can't break it, and it works with keyboard and on phones
 - **Hosted feedback page** for each project, to share as a link
 - The page the feedback was sent from is recorded automatically
+- **Bug reports with context**: choosing "Something is broken" offers a screenshot (capture the current tab, or attach an image) and includes the page's recent JavaScript errors. Every report includes the browser, screen and window size, language, and time zone
 
 **For your customers (project admins)**
 - **Their own dashboard**, signed in with their project admin key: totals, average rating, unresolved count, rating breakdown, search and filters, resolve / reopen, CSV export
+- **Screenshots and browser details on each card**: browser and OS, sizes, language, time zone, and the page errors that happened before the report
 - **Install panel** with the embed snippet, hosted page link, and a live widget preview
 - **Allowed websites**: restrict which sites can send feedback through their widget
 - **Key rotation**: replace a leaked admin key instantly
@@ -68,9 +70,20 @@ Admin keys are shown once, when a project is created or its key is rotated. Only
 ```
 Customer site ──► widget.js (from the S3 website)
       │
-      └──► API Gateway (HTTP API, /v1) ──► Lambda (backend/) ──► DynamoDB (Projects, ProjectFeedback)
-                                                    └──► SNS (owner email alerts)
+      ├──► API Gateway (HTTP API, /v1) ──► Lambda (backend/) ──► DynamoDB (Projects, ProjectFeedback)
+      │                                             ├──► SNS (owner email alerts)
+      │                                             └──► signs upload/view links for the screenshots bucket
+      └──► S3 screenshots bucket (private; direct upload with a presigned post)
 ```
+
+### Screenshots
+
+1. The widget asks `POST /v1/projects/{projectId}/screenshots` for an upload slot (origin-checked like submissions).
+2. It uploads the image straight to the private screenshots bucket with the returned presigned post. That permission lasts 10 minutes, allows JPEG, PNG, or WebP only, and up to 5 MB.
+3. It submits the feedback with the `screenshotId`. The API moves the image from `pending/` to `screenshots/`.
+4. The dashboard shows it through a view link that expires after an hour.
+
+Uploads that never get attached to feedback are deleted from `pending/` after a day by a lifecycle rule. The widget re-encodes every image as JPEG first, which also strips photo metadata such as GPS location. Screen capture uses the browser's own screen-sharing prompt, so nothing is captured without the visitor choosing to share.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -79,7 +92,8 @@ Customer site ──► widget.js (from the S3 website)
 | GET   | `/v1/projects/{projectId}` | owner or project key | Get a project |
 | PATCH | `/v1/projects/{projectId}` | owner or project key | Update `name`, `allowedOrigins`; owner only: `notifyOwner` |
 | POST  | `/v1/projects/{projectId}/rotate-key` | owner or project key | Replace the admin key |
-| POST  | `/v1/projects/{projectId}/feedback` | none (origin-checked) | Submit feedback |
+| POST  | `/v1/projects/{projectId}/screenshots` | none (origin-checked) | Get a one-time screenshot upload slot |
+| POST  | `/v1/projects/{projectId}/feedback` | none (origin-checked) | Submit feedback (optional `context`, `screenshotId`) |
 | GET   | `/v1/projects/{projectId}/feedback` | owner or project key | List feedback, newest first (`limit`, `nextToken`) |
 | PATCH | `/v1/projects/{projectId}/feedback/{feedbackId}` | owner or project key | Set `status` to `new` or `resolved` |
 
@@ -93,6 +107,7 @@ feedback_collector/
 │   ├── lambda_function.py    # Routes requests to the handlers below
 │   ├── projects.py           # Project create / read / update / key rotation
 │   ├── feedback.py           # Submitting, listing, and resolving feedback; alerts
+│   ├── screenshots.py        # Screenshot upload slots, attaching, and view links
 │   ├── auth.py               # Owner token and admin key checks
 │   ├── common.py             # Responses, errors, and validation helpers
 │   └── settings.py           # Environment config and AWS clients
@@ -171,4 +186,6 @@ cfn-lint template.yaml
 
 - **Allowed websites** rely on the `Origin` header, which browsers always send and pages can't fake. Scripts outside a browser can still send any origin, so treat this as stopping other *websites* from using a project, not as authentication. Rate limits cap abuse beyond that.
 - The service's own website (hosted page and widget preview) can always submit to any project.
+- **Privacy:** screenshots can show anything that was on the visitor's screen, and page errors can contain page details. Both are only collected for bug reports, and the widget tells visitors what is sent. Screenshots are kept until deleted from the bucket; deleting individual feedback from the dashboard is planned.
+- Screen capture works in desktop Chrome, Edge, Firefox, and Safari. On phones the widget offers "Attach an image" only.
 - Email alerts go to the owner's address. Per-customer alerts, self-serve signup, and billing are planned for a later milestone.

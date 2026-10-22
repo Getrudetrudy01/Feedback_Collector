@@ -7,6 +7,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 import auth
+import screenshots
 import settings
 from common import (
     ApiError,
@@ -20,7 +21,7 @@ from common import (
     require_text,
     response,
 )
-from projects import load_project
+from projects import check_origin, load_project
 
 MAX_NAME_LENGTH = 100
 MAX_EMAIL_LENGTH = 254
@@ -33,6 +34,13 @@ STATUSES = ('new', 'resolved')
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
 
+# Technical context sent by the widget to help reproduce problems
+SIZE_PATTERN = re.compile(r'^\d{1,5}x\d{1,5}$')
+TIMEZONE_PATTERN = re.compile(r'^[A-Za-z0-9_+\-/]{1,64}$')
+MAX_ERRORS = 10
+MAX_ERROR_TEXT = 500
+MAX_USER_AGENT = 500
+
 # Hidden form field that people can't see but spam bots fill in
 HONEYPOT_FIELD = 'website'
 
@@ -40,6 +48,57 @@ HONEYPOT_FIELD = 'website'
 def new_feedback_id():
     # Starts with the time in milliseconds, so IDs sort newest-last
     return f'{int(time.time() * 1000):013d}-{secrets.token_hex(4)}'
+
+
+def validate_context(event, body):
+    """Browser details: browser and language from request headers, the rest from the widget."""
+    context = {}
+
+    user_agent = get_header(event, 'user-agent')
+    if user_agent:
+        context['userAgent'] = user_agent[:MAX_USER_AGENT]
+    language = (get_header(event, 'accept-language') or '').split(',')[0].split(';')[0].strip()
+    if language:
+        context['language'] = language[:35]
+
+    sent = body.get('context')
+    if sent is None:
+        return context
+    if not isinstance(sent, dict):
+        raise ApiError(400, 'context must be an object')
+
+    for field in ('screen', 'viewport'):
+        value = sent.get(field)
+        if value is not None:
+            if not isinstance(value, str) or not SIZE_PATTERN.match(value):
+                raise ApiError(400, f'context.{field} must look like 1920x1080')
+            context[field] = value
+
+    timezone = sent.get('timezone')
+    if timezone is not None:
+        if not isinstance(timezone, str) or not TIMEZONE_PATTERN.match(timezone):
+            raise ApiError(400, 'context.timezone is invalid')
+        context['timezone'] = timezone
+
+    errors = sent.get('errors')
+    if errors is not None:
+        if not isinstance(errors, list) or len(errors) > MAX_ERRORS:
+            raise ApiError(400, f'context.errors must be a list of at most {MAX_ERRORS} errors')
+        cleaned = []
+        for error in errors:
+            if not isinstance(error, dict) or not isinstance(error.get('message'), str):
+                raise ApiError(400, 'each context error needs a message')
+            # Error text comes from the page and can be long; keep it, but bounded
+            entry = {'message': error['message'][:MAX_ERROR_TEXT]}
+            if isinstance(error.get('source'), str) and error['source']:
+                entry['source'] = error['source'][:MAX_ERROR_TEXT]
+            if isinstance(error.get('line'), int) and not isinstance(error['line'], bool) and error['line'] >= 0:
+                entry['line'] = error['line']
+            cleaned.append(entry)
+        if cleaned:
+            context['errors'] = cleaned
+
+    return context
 
 
 def validate_feedback(body):
@@ -78,21 +137,6 @@ def validate_feedback(body):
     return feedback
 
 
-def check_origin(event, project):
-    """Only accept submissions from the project's websites, when it lists any.
-
-    Browsers always send Origin on these cross-site requests and pages can't fake it,
-    so this stops other sites from using the widget key. (Scripts outside a browser
-    can still set any Origin; rate limits cover that.)
-    """
-    allowed = project.get('allowedOrigins') or []
-    if not allowed:
-        return
-    origin = (get_header(event, 'origin') or '').rstrip('/').lower()
-    if origin not in allowed and not (settings.SITE_ORIGIN and origin == settings.SITE_ORIGIN):
-        raise ApiError(403, 'This website is not allowed to send feedback to this project')
-
-
 def notify(project, item):
     if not settings.sns or not project.get('notifyOwner'):
         return
@@ -111,6 +155,7 @@ def notify(project, item):
                 f'Category: {item["category"]}\n'
                 f'From: {item.get("name", "-")} <{item.get("email", "-")}>\n'
                 f'Page: {item.get("pageUrl", "-")}\n'
+                f'Screenshot: {"yes, see the dashboard" if item.get("screenshotKey") else "no"}\n'
                 f'Time: {item["timestamp"]}\n\n'
                 f'{item["message"]}'
             )
@@ -137,6 +182,13 @@ def submit_feedback(event, project_id):
         'status': 'new',
         'timestamp': now_iso()
     }
+    context = validate_context(event, body)
+    if context:
+        item['context'] = context
+    # Last, after all validation, so a rejected submission doesn't consume the upload
+    if body.get('screenshotId') is not None:
+        item['screenshotKey'] = screenshots.attach(project_id, body['screenshotId'])
+
     settings.feedback_table.put_item(Item=item)
     notify(project, item)
 
@@ -163,8 +215,12 @@ def list_feedback(event, principal, project_id):
 
     result = settings.feedback_table.query(**query_kwargs)
     last_key = result.get('LastEvaluatedKey')
+    items = result.get('Items', [])
+    for item in items:
+        if item.get('screenshotKey'):
+            item['screenshotUrl'] = screenshots.view_url(item['screenshotKey'])
     return response(200, {
-        'feedbacks': result.get('Items', []),
+        'feedbacks': items,
         'nextToken': encode_page_token(last_key) if last_key else None
     })
 
