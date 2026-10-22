@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 
 import auth
 import settings
-from common import ApiError, now_iso, optional_bool, optional_text, parse_body, require_text, response
+from common import ApiError, get_header, now_iso, optional_bool, optional_text, parse_body, require_text, response
 
 MAX_NAME_LENGTH = 100
 MAX_ORIGINS = 20
@@ -23,6 +23,21 @@ def load_project(project_id):
     if not project:
         raise ApiError(404, 'Project not found')
     return project
+
+
+def check_origin(event, project):
+    """Only accept submissions from the project's websites, when it lists any.
+
+    Browsers always send Origin on these cross-site requests and pages can't fake it,
+    so this stops other sites from using the widget key. (Scripts outside a browser
+    can still set any Origin; rate limits cover that.)
+    """
+    allowed = project.get('allowedOrigins') or []
+    if not allowed:
+        return
+    origin = (get_header(event, 'origin') or '').rstrip('/').lower()
+    if origin not in allowed and not (settings.SITE_ORIGIN and origin == settings.SITE_ORIGIN):
+        raise ApiError(403, 'This website is not allowed to send feedback to this project')
 
 
 def validate_origins(value):

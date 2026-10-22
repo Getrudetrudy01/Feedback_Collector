@@ -14,6 +14,11 @@ const CATEGORY_LABELS = {
 
 let currentProject = null;
 let allFeedbacks = [];
+// Screenshot view links last an hour; reuse them across auto-refreshes so images don't reload
+const SCREENSHOT_URL_REUSE_MS = 45 * 60 * 1000;
+const screenshotUrls = new Map();
+// Which cards have their browser details expanded, so re-rendering keeps them open
+const openContexts = new Set();
 let refreshTimer = null;
 let isLoading = false;
 
@@ -204,6 +209,8 @@ async function openProject(projectId) {
     const data = await apiFetch(projectPath(projectId));
     currentProject = data.project;
     allFeedbacks = [];
+    screenshotUrls.clear();
+    openContexts.clear();
     $('feedbackGrid').innerHTML = '';
     if (isOwner()) history.replaceState(null, '', `#${encodeURIComponent(projectId)}`);
 
@@ -329,6 +336,7 @@ async function loadFeedbacks() {
         const feedbacks = await fetchAllFeedbacks(projectId);
         // Ignore the result if the owner switched projects meanwhile
         if (currentProject && currentProject.projectId === projectId) {
+            reuseScreenshotUrls(feedbacks);
             allFeedbacks = feedbacks;
             render();
         }
@@ -345,6 +353,19 @@ async function loadFeedbacks() {
     }
 }
 
+function reuseScreenshotUrls(feedbacks) {
+    const now = Date.now();
+    feedbacks.forEach(fb => {
+        if (!fb.screenshotUrl) return;
+        const cached = screenshotUrls.get(fb.feedbackId);
+        if (cached && now - cached.at < SCREENSHOT_URL_REUSE_MS) {
+            fb.screenshotUrl = cached.url;
+        } else {
+            screenshotUrls.set(fb.feedbackId, { url: fb.screenshotUrl, at: now });
+        }
+    });
+}
+
 async function setStatus(feedbackId, status, button) {
     button.disabled = true;
     try {
@@ -353,7 +374,9 @@ async function setStatus(feedbackId, status, button) {
             { method: 'PATCH', body: JSON.stringify({ status }) }
         );
         const updated = normalize(data.feedback);
-        allFeedbacks = allFeedbacks.map(fb => fb.feedbackId === feedbackId ? updated : fb);
+        // The update response has no view link; keep the one the card already shows
+        allFeedbacks = allFeedbacks.map(fb => fb.feedbackId === feedbackId
+            ? { ...updated, screenshotUrl: fb.screenshotUrl } : fb);
         hideError();
         render();
     } catch (err) {
@@ -461,6 +484,12 @@ function displayFeedbacks(feedbacks) {
                 ${isSafeUrl(fb.pageUrl) ? `<div class="feedback-page">From page:
                     <a href="${escapeHtml(fb.pageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(fb.pageUrl)}</a></div>` : ''}
                 <div class="feedback-message">${escapeHtml(fb.message)}</div>
+                ${isSafeUrl(fb.screenshotUrl) ? `
+                    <a class="feedback-shot" href="${escapeHtml(fb.screenshotUrl)}" target="_blank" rel="noopener noreferrer"
+                       title="Open the full screenshot">
+                        <img src="${escapeHtml(fb.screenshotUrl)}" alt="Screenshot attached to this feedback" loading="lazy">
+                    </a>` : ''}
+                ${renderContext(fb.context, fb.feedbackId)}
                 <div class="feedback-meta">
                     <span>${formatDate(fb.timestamp)}</span>
                     <button class="status-btn ${resolved ? 'secondary' : ''}" data-id="${escapeHtml(fb.feedbackId)}"
@@ -471,6 +500,58 @@ function displayFeedbacks(feedbacks) {
             </div>
         `;
     }).join('');
+}
+
+// A short, readable browser and OS name from the user agent, e.g. "Chrome 130 on Windows"
+function describeBrowser(userAgent) {
+    if (!userAgent) return '';
+    const browsers = [
+        [/Edg(?:e|A|iOS)?\/(\d+)/, 'Edge'],
+        [/OPR\/(\d+)/, 'Opera'],
+        [/SamsungBrowser\/(\d+)/, 'Samsung Internet'],
+        [/(?:Firefox|FxiOS)\/(\d+)/, 'Firefox'],
+        [/(?:Chrome|CriOS)\/(\d+)/, 'Chrome'],
+        [/Version\/(\d+)[\d.]*.*Safari/, 'Safari']
+    ];
+    const systems = [
+        [/Windows/, 'Windows'], [/iPhone|iPad|iPod/, 'iOS'], [/Android/, 'Android'],
+        [/Mac OS X|Macintosh/, 'macOS'], [/CrOS/, 'ChromeOS'], [/Linux/, 'Linux']
+    ];
+    const browser = browsers.find(([pattern]) => pattern.test(userAgent));
+    const system = systems.find(([pattern]) => pattern.test(userAgent));
+    const name = browser ? `${browser[1]} ${userAgent.match(browser[0])[1]}` : 'Unknown browser';
+    return system ? `${name} on ${system[1]}` : name;
+}
+
+function renderContext(context, feedbackId) {
+    if (!context) return '';
+    const browser = describeBrowser(context.userAgent);
+    const errors = context.errors || [];
+    const rows = [
+        ['Browser', browser],
+        ['Screen', context.screen],
+        ['Window', context.viewport],
+        ['Language', context.language],
+        ['Time zone', context.timezone]
+    ].filter(([, value]) => value);
+    const summary = [browser, context.viewport && `window ${context.viewport}`,
+        errors.length && `${errors.length} page error${errors.length === 1 ? '' : 's'}`].filter(Boolean).join(' \u00b7 ');
+
+    return `
+        <details class="feedback-context" data-id="${escapeHtml(feedbackId)}" ${openContexts.has(feedbackId) ? 'open' : ''}>
+            <summary>${escapeHtml(summary || 'Browser details')}</summary>
+            <dl>
+                ${rows.map(([label, value]) => `<dt>${label}</dt><dd>${escapeHtml(value)}</dd>`).join('')}
+                ${context.userAgent ? `<dt>User agent</dt><dd class="small">${escapeHtml(context.userAgent)}</dd>` : ''}
+            </dl>
+            ${errors.length ? `
+                <p class="context-heading">Recent page errors</p>
+                <ol class="page-errors">
+                    ${errors.map(error => `<li><code>${escapeHtml(error.message)}</code>${error.source
+                        ? `<div class="small">${escapeHtml(error.source)}${error.line ? `:${error.line}` : ''}</div>` : ''}</li>`).join('')}
+                </ol>` : ''}
+        </details>
+    `;
 }
 
 // The API only accepts http(s) page URLs, but never trust stored data in an href
@@ -497,18 +578,28 @@ function exportCSV() {
         return;
     }
 
-    const headers = ['Name', 'Email', 'Rating', 'Category', 'Status', 'Message', 'Page URL', 'Timestamp', 'Feedback ID'];
-    const rows = feedbacks.map(fb => [
-        fb.name,
-        fb.email,
-        fb.rating || '',
-        CATEGORY_LABELS[fb.category] || fb.category,
-        fb.status,
-        fb.message,
-        fb.pageUrl,
-        fb.timestamp,
-        fb.feedbackId
-    ]);
+    const headers = ['Name', 'Email', 'Rating', 'Category', 'Status', 'Message', 'Page URL', 'Browser', 'Screen',
+        'Window', 'Page errors', 'Screenshot', 'Timestamp', 'Feedback ID'];
+    const rows = feedbacks.map(fb => {
+        const context = fb.context || {};
+        return [
+            fb.name,
+            fb.email,
+            fb.rating || '',
+            CATEGORY_LABELS[fb.category] || fb.category,
+            fb.status,
+            fb.message,
+            fb.pageUrl,
+            describeBrowser(context.userAgent),
+            context.screen,
+            context.viewport,
+            (context.errors || []).map(error => error.message).join(' | '),
+            // View links expire, so the CSV only says whether there is one
+            fb.screenshotKey ? 'yes (view in dashboard)' : '',
+            fb.timestamp,
+            fb.feedbackId
+        ];
+    });
 
     let csv = headers.join(',') + '\n';
     rows.forEach(row => {
@@ -616,6 +707,14 @@ $('ratingBreakdown').addEventListener('click', (e) => {
     ratingFilter.value = ratingFilter.value === row.dataset.rating ? '' : row.dataset.rating;
     render();
 });
+
+// 'toggle' doesn't bubble, so listen in the capture phase
+$('feedbackGrid').addEventListener('toggle', (e) => {
+    const details = e.target;
+    if (!details.classList || !details.classList.contains('feedback-context')) return;
+    if (details.open) openContexts.add(details.dataset.id);
+    else openContexts.delete(details.dataset.id);
+}, true);
 
 $('feedbackGrid').addEventListener('click', (e) => {
     const button = e.target.closest('.status-btn');

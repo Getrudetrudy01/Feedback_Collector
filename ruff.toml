@@ -5,4 +5,4 @@ select = ["E", "F", "W", "I", "B"]
 
 [lint.isort]
 # Backend modules import each other by name (Lambda puts backend/ on the path)
-known-first-party = ["auth", "common", "feedback", "lambda_function", "projects", "settings"]
+known-first-party = ["auth", "common", "feedback", "lambda_function", "projects", "screenshots", "settings"]

@@ -21,6 +21,7 @@ def settings(monkeypatch):
     monkeypatch.setenv('FEEDBACK_TABLE', 'TestFeedback')
     monkeypatch.setenv('NOTIFY_MAX_RATING', '2')
     monkeypatch.setenv('SITE_ORIGIN', HOSTED_SITE)
+    monkeypatch.setenv('SCREENSHOTS_BUCKET', 'test-screenshots')
 
     with mock_aws():
         dynamodb = boto3.client('dynamodb')
@@ -42,6 +43,7 @@ def settings(monkeypatch):
                 {'AttributeName': 'feedbackId', 'AttributeType': 'S'},
             ],
         )
+        boto3.client('s3').create_bucket(Bucket='test-screenshots')
         monkeypatch.setenv('NOTIFY_TOPIC_ARN', boto3.client('sns').create_topic(Name='alerts')['TopicArn'])
 
         import settings
@@ -54,12 +56,12 @@ def call(settings):
     """Invoke the handler with an HTTP API (v2) event for the given route."""
     import lambda_function
 
-    def _call(route_key, body=None, token=None, path=None, query=None, origin=SITE):
+    def _call(route_key, body=None, token=None, path=None, query=None, origin=SITE, headers=None):
         method = route_key.split(' ')[0]
         event = {
             'routeKey': route_key,
             'requestContext': {'http': {'method': method}},
-            'headers': {'origin': origin} if origin else {},
+            'headers': {**({'origin': origin} if origin else {}), **(headers or {})},
             'pathParameters': path,
             'queryStringParameters': query,
         }

@@ -2,10 +2,14 @@
 import auth
 import feedback
 import projects
+import screenshots
 from common import ApiError, response
 
-# The only route that needs no key: the widget and hosted form post here
-SUBMIT_ROUTE = 'POST /v1/projects/{projectId}/feedback'
+# Routes that need no key: the widget and hosted form call these (origin-checked)
+PUBLIC_ROUTES = {
+    'POST /v1/projects/{projectId}/feedback': lambda e, path: feedback.submit_feedback(e, path['projectId']),
+    'POST /v1/projects/{projectId}/screenshots': lambda e, path: screenshots.create_upload(e, path['projectId']),
+}
 
 # Keyed by the HTTP API routeKey; each handler gets (event, principal, path parameters)
 ROUTES = {
@@ -37,8 +41,8 @@ def route(event):
         return {'statusCode': 204, 'body': ''}
 
     try:
-        if route_key == SUBMIT_ROUTE:
-            return feedback.submit_feedback(event, path['projectId'])
+        if route_key in PUBLIC_ROUTES:
+            return PUBLIC_ROUTES[route_key](event, path)
 
         handler = ROUTES.get(route_key)
         if handler is None:

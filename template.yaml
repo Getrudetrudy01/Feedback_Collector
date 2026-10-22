@@ -103,6 +103,7 @@ Resources:
         Variables:
           OWNER_TOKEN: !Ref OwnerToken
           SITE_ORIGIN: !GetAtt FrontendBucket.WebsiteURL
+          SCREENSHOTS_BUCKET: !Ref ScreenshotsBucket
           PROJECTS_TABLE: !Ref ProjectsTable
           FEEDBACK_TABLE: !Ref ProjectFeedbackTable
           NOTIFY_TOPIC_ARN: !Ref FeedbackTopic
@@ -126,6 +127,17 @@ Resources:
             - Effect: Allow
               Action: sns:Publish
               Resource: !Ref FeedbackTopic
+            # Presigned uploads land in pending/; submitting moves them to screenshots/
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource:
+                - !Sub '${ScreenshotsBucket.Arn}/pending/*'
+                - !Sub '${ScreenshotsBucket.Arn}/screenshots/*'
+            - Effect: Allow
+              Action: s3:DeleteObject
+              Resource: !Sub '${ScreenshotsBucket.Arn}/pending/*'
       Events:
         CreateProject:
           Type: HttpApi
@@ -157,6 +169,12 @@ Resources:
             ApiId: !Ref FeedbackApi
             Method: POST
             Path: /v1/projects/{projectId}/rotate-key
+        CreateScreenshotUpload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeedbackApi
+            Method: POST
+            Path: /v1/projects/{projectId}/screenshots
         SubmitFeedback:
           Type: HttpApi
           Properties:
@@ -190,6 +208,37 @@ Resources:
       TopicArn: !Ref FeedbackTopic
       Protocol: email
       Endpoint: !Ref NotificationEmail
+
+  # Screenshots attached to feedback. Private: browsers upload with short-lived presigned
+  # posts and the dashboard views them with short-lived presigned links.
+  ScreenshotsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      # Customer sites upload directly from the browser
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [POST]
+            AllowedOrigins: ['*']
+            AllowedHeaders: ['*']
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          # Uploads that were never attached to submitted feedback
+          - Id: DeleteAbandonedUploads
+            Status: Enabled
+            Prefix: pending/
+            ExpirationInDays: 1
 
   # Static website hosting for the frontend/ folder (hosted form, dashboard, widget.js)
   FrontendBucket:
@@ -229,6 +278,8 @@ Outputs:
   FrontendBucketName:
     Description: Upload the frontend/ folder here
     Value: !Ref FrontendBucket
+  ScreenshotsBucketName:
+    Value: !Ref ScreenshotsBucket
   ProjectsTableName:
     Value: !Ref ProjectsTable
   FeedbackTableName:
