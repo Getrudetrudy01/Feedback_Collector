@@ -2,7 +2,9 @@
 const API_URL = window.APP_CONFIG.apiUrl;
 const TOKEN_KEY = 'feedbackAdminToken';
 const ADMIN_KEY_PREFIX = 'sk_';
-const PAGE_SIZE = 500;
+const PAGE_SIZE = 100;
+const EXPORT_PAGE_SIZE = 500;
+const POLL_MS = 30000;
 
 const CATEGORY_LABELS = {
     general: 'General',
@@ -13,14 +15,21 @@ const CATEGORY_LABELS = {
 };
 
 let currentProject = null;
-let allFeedbacks = [];
+// The loaded pages for the current filters, newest first. Older pages load on demand.
+let feedbacks = [];
+let nextToken = null;
+// Totals from the server: { total, unresolved, ratings, latestFeedbackId }
+let stats = null;
+// Bumped whenever the list is reloaded, so responses for old filters are ignored
+let listGeneration = 0;
 // Screenshot view links last an hour; reuse them across auto-refreshes so images don't reload
 const SCREENSHOT_URL_REUSE_MS = 45 * 60 * 1000;
 const screenshotUrls = new Map();
 // Which cards have their browser details expanded, so re-rendering keeps them open
 const openContexts = new Set();
 let refreshTimer = null;
-let isLoading = false;
+let isPolling = false;
+let searchTimer = null;
 
 class UnauthorizedError extends Error {}
 
@@ -57,7 +66,7 @@ function showOnly(viewId) {
 function showLogin(message) {
     clearInterval(refreshTimer);
     currentProject = null;
-    allFeedbacks = [];
+    resetFeedbackState();
     showOnly('loginForm');
     $('loginError').textContent = message || '';
     $('loginError').classList.toggle('hidden', !message);
@@ -208,10 +217,12 @@ function showNewKey(container, adminKey, project) {
 async function openProject(projectId) {
     const data = await apiFetch(projectPath(projectId));
     currentProject = data.project;
-    allFeedbacks = [];
+    resetFeedbackState();
     screenshotUrls.clear();
     openContexts.clear();
     $('feedbackGrid').innerHTML = '';
+    $('resultCount').textContent = '';
+    $('loadMoreBtn').classList.add('hidden');
     if (isOwner()) history.replaceState(null, '', `#${encodeURIComponent(projectId)}`);
 
     showOnly('dashboard');
@@ -221,10 +232,10 @@ async function openProject(projectId) {
     $('rotateResult').classList.add('hidden');
     $('settingsStatus').textContent = '';
 
-    loadFeedbacks();
-    // Auto-refresh every 30 seconds
+    reloadFeedbacks();
+    // Every 30 seconds, fetch only feedback newer than what's shown
     clearInterval(refreshTimer);
-    refreshTimer = setInterval(loadFeedbacks, 30000);
+    refreshTimer = setInterval(pollNewFeedbacks, POLL_MS);
 }
 
 function renderProjectInfo() {
@@ -312,48 +323,160 @@ function normalize(fb) {
     };
 }
 
-async function fetchAllFeedbacks(projectId) {
-    const feedbacks = [];
-    let nextToken = null;
-    do {
-        const params = new URLSearchParams({ limit: PAGE_SIZE });
-        if (nextToken) params.set('nextToken', nextToken);
-        const data = await apiFetch(`${projectPath(projectId)}/feedback?${params}`);
-        feedbacks.push(...data.feedbacks);
-        nextToken = data.nextToken;
-    } while (nextToken);
-    // The API returns newest first
-    return feedbacks.map(normalize);
+function resetFeedbackState() {
+    listGeneration++;
+    feedbacks = [];
+    nextToken = null;
+    stats = null;
 }
 
-async function loadFeedbacks() {
-    if (isLoading || !currentProject) return;
-    isLoading = true;
+// The API filters and searches; these are the query parameters for the current filters
+function filterParams() {
+    const f = getFilters();
+    const params = {};
+    if (f.search) params.q = f.search;
+    if (f.rating) params.rating = f.rating;
+    if (f.category) params.category = f.category;
+    if (f.status) params.status = f.status;
+    return params;
+}
+
+function hasFilters() {
+    return Object.keys(filterParams()).length > 0;
+}
+
+function fetchPage(projectId, params) {
+    return apiFetch(`${projectPath(projectId)}/feedback?${new URLSearchParams(params)}`);
+}
+
+// Ignore results that arrive after the owner switched projects
+function isCurrent(projectId) {
+    return Boolean(currentProject) && currentProject.projectId === projectId;
+}
+
+function reportLoadError(err) {
+    if (err instanceof UnauthorizedError) return handleUnauthorized();
+    showError(`Error loading feedbacks: ${err.message}`);
+    console.error('Error loading feedbacks:', err);
+}
+
+async function loadStats() {
     const projectId = currentProject.projectId;
+    const data = await apiFetch(`${projectPath(projectId)}/stats`);
+    if (!isCurrent(projectId)) return;
+    stats = data;
+    render();
+}
 
-    // Only show the spinner on the first load, so auto-refresh doesn't flicker
-    $('loading').classList.toggle('hidden', allFeedbacks.length > 0);
+// First page for the current filters, replacing what's shown
+async function loadList() {
+    const generation = ++listGeneration;
+    const projectId = currentProject.projectId;
+    const page = await fetchPage(projectId, { ...filterParams(), limit: PAGE_SIZE });
+    if (generation !== listGeneration || !isCurrent(projectId)) return;
+    feedbacks = [];
+    addPage(page);
+}
+
+function addPage(page) {
+    const items = page.feedbacks.map(normalize);
+    reuseScreenshotUrls(items);
+    feedbacks.push(...items);
+    nextToken = page.nextToken;
+    render();
+}
+
+// Opening a project and the Refresh button: totals and the first page
+async function reloadFeedbacks() {
+    if (!currentProject) return;
+    // Only show the spinner on the first load, so refreshing doesn't flicker
+    $('loading').classList.toggle('hidden', feedbacks.length > 0);
     hideError();
-
     try {
-        const feedbacks = await fetchAllFeedbacks(projectId);
-        // Ignore the result if the owner switched projects meanwhile
-        if (currentProject && currentProject.projectId === projectId) {
-            reuseScreenshotUrls(feedbacks);
-            allFeedbacks = feedbacks;
+        await Promise.all([loadStats(), loadList()]);
+    } catch (err) {
+        reportLoadError(err);
+    } finally {
+        $('loading').classList.add('hidden');
+    }
+}
+
+async function reloadList() {
+    hideError();
+    try {
+        await loadList();
+    } catch (err) {
+        reportLoadError(err);
+    }
+}
+
+async function loadMore() {
+    const button = $('loadMoreBtn');
+    const generation = listGeneration;
+    const projectId = currentProject.projectId;
+    button.disabled = true;
+    try {
+        const page = await fetchPage(projectId, { ...filterParams(), limit: PAGE_SIZE, nextToken });
+        if (generation === listGeneration && isCurrent(projectId)) addPage(page);
+    } catch (err) {
+        reportLoadError(err);
+    } finally {
+        button.disabled = false;
+    }
+}
+
+// Usually returns nothing: only feedback newer than the newest one already counted
+async function pollNewFeedbacks() {
+    if (isPolling || !currentProject || !stats) return;
+    isPolling = true;
+    const projectId = currentProject.projectId;
+    try {
+        const params = { limit: PAGE_SIZE };
+        if (stats.latestFeedbackId) params.since = stats.latestFeedbackId;
+        const page = await fetchPage(projectId, params);
+        if (!isCurrent(projectId) || page.feedbacks.length === 0) return;
+        // More arrived than one page holds: simpler to start over
+        if (page.nextToken) return await reloadFeedbacks();
+
+        const known = new Set(feedbacks.map(fb => fb.feedbackId));
+        const fresh = page.feedbacks.map(normalize).filter(fb => !known.has(fb.feedbackId));
+        stats.latestFeedbackId = page.feedbacks[0].feedbackId;
+        countIntoStats(fresh);
+        if (hasFilters()) {
+            // Only the server knows which new items match the filters
+            await loadList();
+        } else {
+            reuseScreenshotUrls(fresh);
+            feedbacks = [...fresh, ...feedbacks];
             render();
         }
     } catch (err) {
-        if (err instanceof UnauthorizedError) {
-            handleUnauthorized();
-        } else {
-            showError(`Error loading feedbacks: ${err.message}`);
-            console.error('Error loading feedbacks:', err);
-        }
+        reportLoadError(err);
     } finally {
-        $('loading').classList.add('hidden');
-        isLoading = false;
+        isPolling = false;
     }
+}
+
+function countIntoStats(items) {
+    items.forEach(fb => {
+        stats.total++;
+        if (fb.status !== 'resolved') stats.unresolved++;
+        if (fb.rating >= 1 && fb.rating <= 5) stats.ratings[fb.rating]++;
+    });
+}
+
+// Every page for the current filters, for CSV export
+async function fetchAllFeedbacks(projectId) {
+    const all = [];
+    let token = null;
+    do {
+        const params = { ...filterParams(), limit: EXPORT_PAGE_SIZE };
+        if (token) params.nextToken = token;
+        const data = await fetchPage(projectId, params);
+        all.push(...data.feedbacks);
+        token = data.nextToken;
+    } while (token);
+    return all.map(normalize);
 }
 
 function reuseScreenshotUrls(feedbacks) {
@@ -377,9 +500,15 @@ async function setStatus(feedbackId, status, button) {
             { method: 'PATCH', body: JSON.stringify({ status }) }
         );
         const updated = normalize(data.feedback);
+        const previous = feedbacks.find(fb => fb.feedbackId === feedbackId);
+        if (stats && previous && (previous.status === 'resolved') !== (updated.status === 'resolved')) {
+            stats.unresolved += updated.status === 'resolved' ? -1 : 1;
+        }
         // The update response has no view link; keep the one the card already shows
-        allFeedbacks = allFeedbacks.map(fb => fb.feedbackId === feedbackId
-            ? { ...updated, screenshotUrl: fb.screenshotUrl } : fb);
+        const statusFilter = getFilters().status;
+        feedbacks = feedbacks
+            .map(fb => fb.feedbackId === feedbackId ? { ...updated, screenshotUrl: fb.screenshotUrl } : fb)
+            .filter(fb => !statusFilter || fb.status === statusFilter);
         hideError();
         render();
     } catch (err) {
@@ -403,44 +532,36 @@ function getFilters() {
     };
 }
 
-function matchesRating(fb, rating) {
-    if (!rating) return true;
-    if (rating === 'none') return fb.rating === 0;
-    return fb.rating === Number(rating);
-}
-
-function applyFilters(feedbacks) {
-    const f = getFilters();
-    return feedbacks.filter(fb =>
-        matchesRating(fb, f.rating) &&
-        (!f.category || fb.category === f.category) &&
-        (!f.status || fb.status === f.status) &&
-        (!f.search || [fb.name, fb.email, fb.message, fb.pageUrl]
-            .some(text => String(text || '').toLowerCase().includes(f.search)))
-    );
-}
-
 function render() {
-    const filtered = applyFilters(allFeedbacks);
-    updateStats(allFeedbacks);
-    renderBreakdown(allFeedbacks);
-    displayFeedbacks(filtered);
-    $('resultCount').textContent = `Showing ${filtered.length} of ${allFeedbacks.length} feedbacks`;
+    if (stats) {
+        updateStats(stats);
+        renderBreakdown(stats);
+    }
+    displayFeedbacks(feedbacks);
+    $('loadMoreBtn').classList.toggle('hidden', !nextToken);
+    $('resultCount').textContent = resultSummary();
 }
 
-function updateStats(feedbacks) {
-    $('totalCount').textContent = feedbacks.length;
-    $('unresolvedCount').textContent = feedbacks.filter(fb => fb.status !== 'resolved').length;
+function resultSummary() {
+    if (!stats) return '';
+    if (!hasFilters()) return `Showing ${feedbacks.length} of ${stats.total} feedbacks`;
+    const more = nextToken ? ' so far (load more to search older feedback)' : '';
+    return `Showing ${feedbacks.length} matching feedback${feedbacks.length === 1 ? '' : 's'}${more}`;
+}
 
-    const rated = feedbacks.filter(fb => fb.rating > 0);
-    $('avgRating').textContent = rated.length
-        ? (rated.reduce((sum, fb) => sum + fb.rating, 0) / rated.length).toFixed(1)
+function updateStats(stats) {
+    $('totalCount').textContent = stats.total;
+    $('unresolvedCount').textContent = stats.unresolved;
+
+    const counts = [1, 2, 3, 4, 5].map(rating => stats.ratings[rating] || 0);
+    const rated = counts.reduce((sum, count) => sum + count, 0);
+    $('avgRating').textContent = rated
+        ? (counts.reduce((sum, count, i) => sum + count * (i + 1), 0) / rated).toFixed(1)
         : '–';
 }
 
-function renderBreakdown(feedbacks) {
-    const counts = [0, 0, 0, 0, 0, 0];
-    feedbacks.forEach(fb => { if (fb.rating >= 1 && fb.rating <= 5) counts[fb.rating]++; });
+function renderBreakdown(stats) {
+    const counts = [0, 1, 2, 3, 4, 5].map(rating => stats.ratings[rating] || 0);
     const max = Math.max(1, ...counts);
     const activeRating = $('ratingFilter').value;
 
@@ -459,12 +580,19 @@ function displayFeedbacks(feedbacks) {
     const grid = $('feedbackGrid');
 
     if (feedbacks.length === 0) {
-        const filtered = allFeedbacks.length > 0;
+        // Nothing to say until the first response arrives
+        if (!stats) {
+            grid.innerHTML = '';
+            return;
+        }
+        const filtered = stats.total > 0;
+        const hint = nextToken ? 'None of the most recent feedback matches. Load more to search older feedback'
+            : 'Try changing the search or filters';
         grid.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">${filtered ? '🔍' : '📭'}</div>
                 <h3>${filtered ? 'No matching feedback' : 'No feedback yet'}</h3>
-                <p>${filtered ? 'Try changing the search or filters'
+                <p>${filtered ? hint
                     : 'Install the widget (see "Install & settings" above) and feedback will appear here'}</p>
             </div>
         `;
@@ -573,9 +701,20 @@ function hideError() {
 
 // ---- CSV export ----
 
-function exportCSV() {
-    // Exports what's currently shown, so filters apply
-    const feedbacks = applyFilters(allFeedbacks);
+async function exportCSV() {
+    // Every item matching the current filters, including pages not loaded yet
+    const button = $('exportBtn');
+    button.disabled = true;
+    let feedbacks;
+    try {
+        feedbacks = await fetchAllFeedbacks(currentProject.projectId);
+    } catch (err) {
+        if (err instanceof UnauthorizedError) return handleUnauthorized();
+        showError(`Could not export: ${err.message}`);
+        return;
+    } finally {
+        button.disabled = false;
+    }
     if (feedbacks.length === 0) {
         alert('No feedbacks to export');
         return;
@@ -695,12 +834,17 @@ document.addEventListener('click', (e) => {
     if (button) copyText(button.dataset.copy, button);
 });
 
-$('refreshBtn').addEventListener('click', loadFeedbacks);
+$('refreshBtn').addEventListener('click', reloadFeedbacks);
 $('exportBtn').addEventListener('click', exportCSV);
+$('loadMoreBtn').addEventListener('click', loadMore);
 
-$('searchInput').addEventListener('input', render);
+// Wait for a pause in typing before asking the server
+$('searchInput').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(reloadList, 300);
+});
 ['ratingFilter', 'categoryFilter', 'statusFilter'].forEach(id => {
-    $(id).addEventListener('change', render);
+    $(id).addEventListener('change', reloadList);
 });
 
 $('ratingBreakdown').addEventListener('click', (e) => {
@@ -708,7 +852,9 @@ $('ratingBreakdown').addEventListener('click', (e) => {
     if (!row) return;
     const ratingFilter = $('ratingFilter');
     ratingFilter.value = ratingFilter.value === row.dataset.rating ? '' : row.dataset.rating;
-    render();
+    // Highlight the chosen row right away; the list follows when it loads
+    if (stats) renderBreakdown(stats);
+    reloadList();
 });
 
 // 'toggle' doesn't bubble, so listen in the capture phase
